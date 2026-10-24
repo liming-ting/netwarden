@@ -1,0 +1,39 @@
+# netwarden in a normal bridge network: Docker Desktop (Windows / macOS), or a Linux
+# host where you don't want host networking. What works: DNS ingestion from AdGuard /
+# Pi-hole, the AI explanations, the dashboard, phones. What does not: discovery of the
+# LAN (the container only sees Docker's virtual network), so device names come from
+# your DNS filter's client list and your own labels.
+#
+#   docker compose -f deploy/compose.bridge.yaml up -d
+#   docker compose -f deploy/compose.bridge.yaml logs netwarden   # the admin code
+#
+# The container cannot know the address you type in the browser: set
+# NETWARDEN_ADVERTISED_URL to it (the pairing QR code points there and the dashboard
+# answers to it). On Docker Desktop, http://localhost:8787 is fine for this computer.
+services:
+  netwarden:
+    image: ghcr.io/liming-ting/netwarden:latest
+    container_name: netwarden
+    restart: unless-stopped
+    init: true
+    ports:
+      - "8787:8787"     # "127.0.0.1:8787:8787" = this computer only
+    env_file:
+      - path: ./netwarden.env
+        required: false
+    environment:
+      NETWARDEN_HOST: "0.0.0.0"           # inside the container; Docker publishes the port
+      NETWARDEN_ADVERTISED_URL: "http://192.168.1.20:8787"   # <- your box's address
+    volumes:
+      - netwarden-data:/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  netwarden-data:

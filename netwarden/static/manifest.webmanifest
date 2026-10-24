@@ -1,0 +1,17 @@
+{
+  "name": "netwarden",
+  "short_name": "netwarden",
+  "id": "/",
+  "start_url": "../",
+  "scope": "../",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f6f8",
+  "theme_color": "#2563eb",
+  "icons": [
+    {"src": "icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any"},
+    {"src": "icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "maskable"},
+    {"src": "icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable"},
+    {"src": "apple-touch-icon.png", "type": "image/png", "sizes": "180x180", "purpose": "any"}
+  ]
+}

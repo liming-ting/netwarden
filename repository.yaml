@@ -1,0 +1,6 @@
+# Home Assistant add-on repository: this repo doubles as one. Add
+# https://github.com/liming-ting/netwarden in Settings > Add-ons > Add-on Store > Repositories;
+# the Supervisor finds the add-on in ha-addon/ (docs/home_assistant.md).
+name: netwarden
+url: https://github.com/liming-ting/netwarden
+maintainer: liming-ting

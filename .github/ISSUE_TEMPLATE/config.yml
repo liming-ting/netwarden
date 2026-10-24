@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/liming-ting/netwarden/security/advisories/new
+    about: Please report security problems privately (see SECURITY.md), not as a public issue.
+  - name: Security policy
+    url: https://github.com/liming-ting/netwarden/blob/main/SECURITY.md
+    about: Supported versions, scope and what to expect.

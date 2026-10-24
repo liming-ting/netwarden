@@ -1,0 +1,228 @@
+# Container images: build + smoke test (linux/amd64 only) on every pull request, push to main
+# and tag - a push to main pushes NO image. Only a version tag (v*), once that smoke test
+# and the unit tests (job `tests`) passed, builds multi-arch (QEMU) and pushes to GHCR: the default image and the Home
+# Assistant add-on image (Dockerfile target `addon`, <image>-addon; ha-addon/config.yaml),
+# tags <version>, <major>.<minor> and latest (final releases only). Only GITHUB_TOKEN is
+# used. Pull requests get no secrets and no write access (plain `pull_request`, never
+# `pull_request_target`). The smoke builds use the GitHub Actions cache (type=gha).
+name: docker
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build linux/amd64
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: netwarden:ci
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
+
+      - name: Start (host network, demo home, offline AI)
+        run: |
+          docker run -d --name nw --network host \
+            -e NETWARDEN_HOST=127.0.0.1 -e NETWARDEN_LAN=1 -e NETWARDEN_PORT=8799 \
+            netwarden:ci run --demo --offline-ai
+
+      - name: Wait until healthy
+        run: |
+          for _ in $(seq 1 60); do
+            state=$(docker inspect -f '{{.State.Health.Status}}' nw)
+            [ "$state" = healthy ] && exit 0
+            [ "$(docker inspect -f '{{.State.Running}}' nw)" = true ] || break
+            sleep 2
+          done
+          docker logs nw; exit 1
+
+      - name: /healthz and /api/meta
+        run: |
+          curl -fsS http://127.0.0.1:8799/healthz | tee /dev/stderr | grep -q '"status": "ok"'
+          meta=$(curl -fsS http://127.0.0.1:8799/api/meta)
+          echo "$meta" | grep -q '"ai_mode": "offline"'
+          echo "$meta" | grep -q '"demo": true'
+          echo "$meta" | grep -q '"version": "'
+
+      - name: The first start printed one admin code; `pair --admin` makes another
+        run: |
+          docker logs nw 2>&1 | grep -q '/pair#'
+          docker exec nw netwarden pair --admin --local --db /data/demo.db --port 8799 | tee pair.txt
+          grep -Eq '[A-Z2-9]{5}-[A-Z2-9]{5}' pair.txt
+
+      - name: Not running as root
+        run: |
+          [ "$(docker exec nw id -u)" != 0 ]
+          [ "$(docker inspect -f '{{.Config.User}}' nw)" = netwarden ]
+
+      - name: docker stop finishes quickly (SIGTERM, PID 1)
+        run: |
+          start=$(date +%s)
+          docker stop -t 20 nw
+          took=$(( $(date +%s) - start ))
+          echo "stopped in ${took}s"
+          [ "$took" -lt 10 ]
+          [ "$(docker inspect -f '{{.State.ExitCode}}' nw)" = 0 ]
+
+      - name: Logs on failure
+        if: failure()
+        run: docker logs nw || true
+
+      # --- the Home Assistant add-on image (no Supervisor here: its environment is faked
+      # with a SUPERVISOR_TOKEN and a root-owned /data holding options.json) ---
+      - name: Build the add-on image (target addon, linux/amd64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: addon
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: netwarden-addon:ci
+          cache-from: |
+            type=gha,scope=runtime
+            type=gha,scope=addon
+          cache-to: type=gha,scope=addon,mode=max
+
+      - name: Add-on starts, drops root, maps its options, answers /healthz
+        run: |
+          mkdir -p addon-data
+          echo '{"dns_source": "adguard", "offline_ai": true, "lan_access": false, "language": "en"}' > addon-data/options.json
+          sudo chown -R root:root addon-data
+          docker run -d --name nwa --network host -e SUPERVISOR_TOKEN=ci-fake-token \
+            -v "$PWD/addon-data:/data" netwarden-addon:ci python3 -m netwarden.addon --no-loops
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8787/healthz && break
+            [ "$(docker inspect -f '{{.State.Running}}' nwa)" = true ] || { docker logs nwa; exit 1; }
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8787/healthz | grep -q '"status": "ok"'
+          # running as the unprivileged user, and /data is now its own
+          docker exec nwa sh -c 'grep -Eq "^Uid:[[:space:]]+10001" /proc/1/status'
+          [ "$(sudo stat -c %u addon-data/netwarden.db)" = 10001 ]
+          # loopback needs a session in the add-on (other host-network add-ons share it)
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/meta)" = 401 ]
+          # the token never reaches the log
+          if docker logs nwa 2>&1 | grep -q ci-fake-token; then exit 1; fi
+          docker stop -t 20 nwa
+
+      - name: The add-on image refuses to start outside Home Assistant
+        run: |
+          if docker run --rm netwarden-addon:ci; then exit 1; fi
+
+      - name: Add-on logs on failure
+        if: failure()
+        run: docker logs nwa || true
+
+  # On a tag only: the unit tests again, in this workflow, so that `release` cannot push
+  # images of a commit whose tests fail (ci.yml is a separate workflow, not a `needs`).
+  # Python 3.12 = the images' Python (Dockerfile base image).
+  tests:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    env:
+      TZ: UTC
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Locale check
+        run: python3 -m netwarden.i18n --check
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests
+
+  # A tag pushes images only after the unit tests and the same smoke test passed on that
+  # very commit.
+  release:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: [smoke, tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Image name (ghcr.io/liming-ting/netwarden from github.repository, lower case)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          # `latest` only for a final release tag (latest=auto skips v1.2.3-rc.1 etc.)
+          flavor: |
+            latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          # GitHub reports the LICENSE file as "AGPL-3.0"; the project is "-or-later"
+          # (pyproject, Dockerfile): the same value as the Dockerfile label, no conflict
+          labels: |
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+
+      - name: Build and push (amd64, arm64, arm/v7)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+
+      # The Home Assistant add-on image: the Supervisor pulls <image>-addon:<version>
+      # (ha-addon/config.yaml `image` + `version`), so it gets the plain version tag.
+      - name: Build and push the add-on image (amd64, arm64, arm/v7)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: addon
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ env.IMAGE }}-addon:${{ steps.meta.outputs.version }}
+          build-args: VERSION=${{ steps.meta.outputs.version }}

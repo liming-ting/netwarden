@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Env / secrets
+.env
+.env.*
+*.env
+!*.env.example
+
+# Internal notes (never published)
+launch/
+CLAUDE.local.md
+
+# Data / caches / backups (nothing generated is published; tests create what they need)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.log
+*.tgz
+data/
+.cache/
+backups/
+netwarden-backup-*.json
+
+# Dev tools (AdGuard Home dev instance, etc.)
+AdGuardHome/
+AdGuardHome*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

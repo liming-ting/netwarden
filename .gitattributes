@@ -1,0 +1,43 @@
+# Line endings: the repository stores LF for every text file, and every OS checks text out
+# with LF - also with core.autocrlf=true (an eol attribute wins over it). Only Windows batch
+# files check out with CRLF (cmd.exe misreads labels / goto in LF files). The working tree
+# already matches this, so a fresh commit leaves `git status` clean.
+# tests/test_round8_r.py checks these rules and the bytes of the files.
+* text=auto eol=lf
+
+# Explicit, so git never has to guess (shell scripts and the Dockerfile break with CRLF)
+*.sh text eol=lf
+*.py text eol=lf
+Dockerfile text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.svg text eol=lf
+*.webmanifest text eol=lf
+*.sql text eol=lf
+*.txt text eol=lf
+*.example text eol=lf
+
+# Windows batch files
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary: never converted, never diffed as text
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.woff2 binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.tgz binary
+*.gz binary
+*.zip binary

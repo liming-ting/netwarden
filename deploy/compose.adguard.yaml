@@ -1,0 +1,61 @@
+# netwarden + AdGuard Home (the official adguard/adguardhome image), both on the host
+# network of a Linux box (a Raspberry Pi, a NAS, a small server).
+#
+#   cp deploy/netwarden.env.example deploy/netwarden.env
+#   docker compose -f deploy/compose.adguard.yaml up -d
+#   open http://<this-box>:3000 once to set up AdGuard Home (admin user + password),
+#   put the same user / password into deploy/netwarden.env, then:
+#   docker compose -f deploy/compose.adguard.yaml restart netwarden
+#
+# Port 53: on Ubuntu / Debian with systemd-resolved, its stub listener already holds
+# 127.0.0.53:53, and AdGuard Home will fail with "address already in use". Free it by
+# hand (docs/install.md, "Port 53"): DNSStubListener=no in /etc/systemd/resolved.conf
+# and restart systemd-resolved. netwarden never changes this for you.
+#
+# netwarden only READS AdGuard Home's query log. It never changes AdGuard settings and
+# never touches your router: pointing devices (or the router's DHCP DNS) at this box
+# is a step you take yourself, when you are ready.
+services:
+  adguardhome:
+    image: adguard/adguardhome:latest
+    container_name: adguardhome
+    restart: unless-stopped
+    network_mode: host                    # DNS :53, setup UI :3000 (then its web UI port)
+    volumes:
+      - adguard-work:/opt/adguardhome/work
+      - adguard-conf:/opt/adguardhome/conf
+
+  netwarden:
+    image: ghcr.io/liming-ting/netwarden:latest
+    container_name: netwarden
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    depends_on:
+      - adguardhome
+    env_file:
+      - path: ./netwarden.env
+        required: false
+    environment:
+      NETWARDEN_HOST: "127.0.0.1"
+      NETWARDEN_LAN: "1"
+      NETWARDEN_PORT: "8787"
+      NETWARDEN_DNS_SOURCE: "adguard"
+      # In netwarden.env: ADGUARD_URL=http://127.0.0.1:80 (AdGuard Home's web UI on this
+      # same host - the port you chose in its setup wizard) + ADGUARD_USER / ADGUARD_PASS.
+      # (Values here would win over netwarden.env, so the address is not set here.)
+    volumes:
+      - netwarden-data:/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  netwarden-data:
+  adguard-work:
+  adguard-conf:

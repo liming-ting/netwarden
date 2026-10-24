@@ -1,0 +1,57 @@
+configuration:
+  language:
+    name: Language
+    description: >-
+      Dashboard and answer language. Leave empty to choose it in the dashboard
+      (Settings); set here, it can't be changed there.
+  timezone:
+    name: Time zone
+    description: >-
+      IANA name such as Europe/Berlin. Leave empty to use Home Assistant's time zone.
+  dns_source:
+    name: DNS source
+    description: Where per-device DNS comes from - AdGuard Home or Pi-hole (v6).
+  adguard_url:
+    name: AdGuard Home URL
+    description: >-
+      The address of AdGuard Home's web interface, for example http://192.168.1.2:3000.
+      netwarden only reads its query log.
+  adguard_user:
+    name: AdGuard Home user name
+  adguard_password:
+    name: AdGuard Home password
+  pihole_url:
+    name: Pi-hole URL
+    description: For example http://192.168.1.3 (Pi-hole v6). Used when DNS source is pihole.
+  pihole_password:
+    name: Pi-hole password
+    description: The web interface password or an app password.
+  ntopng_url:
+    name: ntopng URL (optional)
+    description: For bytes per device. Without it netwarden shows DNS activity only.
+  ntopng_user:
+    name: ntopng user name
+  ntopng_password:
+    name: ntopng password
+  anthropic_api_key:
+    name: Anthropic API key (optional)
+    description: >-
+      For AI answers from Claude. Only called when you ask something in the AI page;
+      without a key (or with offline AI) the AI page uses a built-in offline summary.
+  ai_api_key:
+    name: Key for an OpenAI-compatible server (optional)
+    description: >-
+      Only if your local or private AI server (set in the dashboard's Settings) needs one.
+  offline_ai:
+    name: Offline AI only
+    description: Never call an AI model; answers come from the built-in offline summary.
+  lan_access:
+    name: Access from other devices on the LAN
+    description: >-
+      Also open the dashboard on this host's LAN address (port 8787) for phones and
+      other computers. They must be paired first (a one-time code shown in the
+      dashboard). Plain HTTP - trusted home networks only. Restart the add-on after
+      changing it.
+  retention_days:
+    name: Keep history for (days)
+    description: DNS and traffic history older than this is removed (default 90, at least 8).

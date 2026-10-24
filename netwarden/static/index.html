@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-Hant" data-base="__BASE__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1118" media="(prefers-color-scheme: dark)">
+<!-- "Add to Home Screen": opens like an app (no browser bars), with its own icon -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="netwarden">
+<title>netwarden</title>
+<link rel="icon" href="__BASE__/static/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="__BASE__/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="__BASE__/static/apple-touch-icon.png">
+<link rel="stylesheet" href="__BASE__/static/app.css?v=__V__">
+<script src="__BASE__/static/map.js?v=__V__" defer></script>
+<script src="__BASE__/static/app.js?v=__V__" defer></script>
+</head>
+<body>
+<!-- netwarden dashboard shell. Every visible string comes from netwarden/locales/<code>.json
+     (GET /api/locale) and is filled in by app.js; nothing here talks to anything but this server. -->
+<a class="skip" href="#main" data-i18n="app.skip"></a>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <defs>
+    <!-- sections + actions: 24x24, stroked with currentColor. Every icon here was drawn for
+         netwarden (no icon set; THIRD_PARTY_NOTICES.md "Icons"). -->
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></symbol>
+    <symbol id="i-devices" viewBox="0 0 24 24"><rect x="2.5" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="18" y="8" width="4" height="12" rx="1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M2.5 12c2.6-4 5.8-6 9.5-6s6.9 2 9.5 6c-2.6 4-5.8 6-9.5 6s-6.9-2-9.5-6z"/><circle cx="12" cy="12" r="2.5"/><path d="M4 20L20 4"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2.5 13h5l2-4 3 9 3.5-13 2 8h3.5"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.8"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5h.01M18.5 5.5h.01M5.5 18.5h.01M18.5 18.5h.01"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M14 3.7A8.5 8.5 0 1 0 20.3 14 6.5 6.5 0 0 1 14 3.7z"/></symbol>
+    <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" class="fill"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 17h-19z"/><path d="M12 10v4.5M12 17.5h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-port" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.7"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h13l-3-3M20 16H7l3 3"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2.5-6.5z"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-family" viewBox="0 0 24 24"><circle cx="8" cy="6.5" r="3"/><circle cx="17" cy="9" r="2.3"/><path d="M2.5 20a5.5 5.5 0 0 1 11 0"/><path d="M13.6 15.4A4 4 0 0 1 21 18v2"/></symbol>
+    <symbol id="i-bed" viewBox="0 0 24 24"><path d="M3 6v14M3 16h18v4M21 16v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="2"/></symbol>
+    <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" class="fill"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M6 9.5h1.5M10 9.5h1.5M14 9.5h1.5M18 9.5h.01M7.5 12.5h1.5M11.5 12.5h1.5M15.5 12.5h1.5M8 15.5h8"/></symbol>
+    <!-- Stage H: network health, suggestions, the mobile "More" menu -->
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M8.9 16.4a4 4 0 0 1 6.2 0M5.9 13.9a8 8 0 0 1 12.2 0M2.8 11.3a12 12 0 0 1 18.4 0"/><path d="M12 19h.01"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9.5 16.5v-1.8c0-.9-.5-1.6-1.2-2.3a5.5 5.5 0 1 1 7.4 0c-.7.7-1.2 1.4-1.2 2.3v1.8z"/><path d="M10 19h4M11 21.5h2"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></symbol>
+    <!-- Stage X: the inbox and the settings page -->
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13l2.5-8h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></symbol>
+    <!-- Stage T: the network map, the live indicator -->
+    <symbol id="i-map" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="4.5" cy="6" r="2"/><circle cx="19.5" cy="6" r="2"/><circle cx="5" cy="18.5" r="2"/><circle cx="19" cy="18.5" r="2"/><path d="M10 10.5 6.2 7.3M14 10.5l3.8-3.2M10.2 13.8 6.6 17M13.8 13.8l3.6 3.2"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M3.5 18a8.5 8.5 0 0 1 17 0"/><path d="M12 11v1.5M7.2 13.2l1 1M16.8 13.2l-1 1"/><path d="M12 18l3-4"/><circle cx="12" cy="18" r="1.2"/></symbol>
+    <!-- device types (devicetype.TYPES keys) -->
+    <symbol id="t-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="t-tablet" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M11 18h2"/></symbol>
+    <symbol id="t-computer" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="t-tv" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="1.5"/><path d="M8 21h8M9 2.5l3 3 3-3"/></symbol>
+    <symbol id="t-streaming" viewBox="0 0 24 24"><rect x="3" y="10" width="18" height="7" rx="2"/><path d="M7.5 5.5a6.5 6.5 0 0 1 9 0M10 8a3 3 0 0 1 4 0"/></symbol>
+    <symbol id="t-console" viewBox="0 0 24 24"><path d="M7 8h10a4 4 0 0 1 4 4v2a3 3 0 0 1-5.5 1.7L14.5 14h-5l-1 1.7A3 3 0 0 1 3 14v-2a4 4 0 0 1 4-4z"/><path d="M7 10.5v3M5.5 12h3M16 11h.01M18 13h.01"/></symbol>
+    <symbol id="t-camera" viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="8" rx="2"/><path d="M16 9l5-2v6l-5-2"/><path d="M8 14v4H5"/><path d="M9.5 10h.01"/></symbol>
+    <symbol id="t-speaker" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="3"/><circle cx="12" cy="14" r="3.5"/><path d="M12 6.5h.01"/></symbol>
+    <symbol id="t-network" viewBox="0 0 24 24"><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 16.5h.01M10.5 16.5h.01M17 13V6"/><path d="M14 8a4 4 0 0 1 6 0"/></symbol>
+    <symbol id="t-printer" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+    <symbol id="t-appliance" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="13" r="4.5"/><path d="M7.5 6h.01M10 6h.01"/></symbol>
+    <symbol id="t-vacuum" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M5.5 8.5h3M15.5 8.5h3"/></symbol>
+    <symbol id="t-wearable" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2.5"/><path d="M9 7l1-4h4l1 4M9 17l1 4h4l1-4"/></symbol>
+    <symbol id="t-iot" viewBox="0 0 24 24"><path d="M9.5 16.5v-1.8c0-.9-.5-1.6-1.2-2.3a5.5 5.5 0 1 1 7.4 0c-.7.7-1.2 1.4-1.2 2.3v1.8z"/><path d="M10 19h4M11 21.5h2M10.5 11.5l1.5 1.5 1.5-1.5"/></symbol>
+    <symbol id="t-unknown" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <aside class="side">
+    <a class="brand" href="#/overview"><span class="logo" aria-hidden="true"></span><span class="bn">net<b>warden</b></span></a>
+    <nav id="nav" class="nav" data-i18n-aria="app.nav_label"></nav>
+    <div class="side-foot" id="sidefoot"></div>
+  </aside>
+
+  <div class="mainwrap">
+    <header class="top">
+      <a class="brand brand-m" href="#/overview" aria-label="netwarden"><span class="logo" aria-hidden="true"></span><span class="bn">net<b>warden</b></span></a>
+      <button type="button" class="searchbtn" id="btnPalette" aria-haspopup="dialog">
+        <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+        <span class="lbl" data-i18n="app.search_open"></span><kbd>/</kbd>
+      </button>
+      <span class="live" id="live" role="status"></span>
+      <span class="updated" id="updated" aria-live="off"></span>
+      <button type="button" class="btn ghost chatbtn" id="btnChat" aria-controls="chatpanel" aria-expanded="false">
+        <svg class="ic" aria-hidden="true"><use href="#i-spark"/></svg><span class="lbl" data-i18n="app.chat.open"></span>
+      </button>
+      <button type="button" class="btn icon ghost keysbtn" id="btnKeys" aria-haspopup="dialog" data-i18n-aria="app.sys.shortcuts">
+        <svg class="ic" aria-hidden="true"><use href="#i-keyboard"/></svg>
+      </button>
+      <button type="button" class="btn icon ghost" id="btnRefresh" data-i18n-aria="app.refresh">
+        <svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>
+      </button>
+      <button type="button" class="btn icon ghost" id="btnTheme">
+        <svg class="ic" aria-hidden="true"><use id="themeIcon" href="#i-auto"/></svg>
+      </button>
+      <select id="langsel" class="langsel" data-i18n-aria="ui.language"></select>
+    </header>
+    <div id="banner" class="banner" role="alert" hidden></div>
+    <div id="notice" class="banner info" role="note" hidden></div>
+    <!-- until the first page renders: a quiet, wordless "loading" (the words need the locale) -->
+    <main id="main" tabindex="-1" aria-busy="true"><div id="view"><div class="boot-spin" aria-hidden="true"></div></div></main>
+  </div>
+
+  <nav id="bottomnav" class="bottomnav" data-i18n-aria="app.nav_label"></nav>
+</div>
+
+<div id="backdrop" class="backdrop"></div>
+<!-- dialogs are <div>s: ARIA in HTML does not allow role=dialog on <aside> -->
+<div id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" inert>
+  <div id="drawerbody" class="drawer-in"></div>
+</div>
+
+<!-- the AI chat beside every section (a bottom sheet on phones); not modal on desktop -->
+<div id="chatscrim" class="chatscrim"></div>
+<div id="chatpanel" class="chatpanel" role="dialog" aria-labelledby="chat-title" hidden>
+  <div id="chatpanelbody" class="chatpanel-in"></div>
+</div>
+
+<div id="keysheet" class="palette sheet" role="dialog" aria-modal="true" aria-labelledby="keys-title" hidden>
+  <div id="keysbody" class="pal-panel sheet-panel"></div>
+</div>
+
+<div id="prevsheet" class="palette sheet" role="dialog" aria-modal="true" aria-labelledby="prev-title" hidden>
+  <div id="prevbody" class="pal-panel sheet-panel wide"></div>
+</div>
+
+<!-- Stage X: "Are you sure?" before an action that is not a quick, undoable note -->
+<div id="confirmsheet" class="palette sheet" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text" hidden>
+  <div id="confirmbody" class="pal-panel sheet-panel"></div>
+</div>
+
+<div id="palette" class="palette" role="dialog" aria-modal="true" data-i18n-aria="app.search_open" hidden>
+  <div class="pal-panel">
+    <div class="pal-in">
+      <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="palq" type="text" autocomplete="off" spellcheck="false" maxlength="100" role="combobox"
+             aria-expanded="true" aria-controls="pallist" aria-autocomplete="list" data-i18n-placeholder="app.palette_placeholder">
+      <kbd>Esc</kbd>
+    </div>
+    <ul id="pallist" class="pal-list" role="listbox"></ul>
+    <div class="pal-foot" data-i18n="app.palette_hint"></div>
+  </div>
+</div>
+
+<!-- toasts are seen here; screen readers hear them once through #say (polite) / #shout (errors) -->
+<div id="toasts" class="toasts" data-i18n-aria="app.toasts_label" role="region"></div>
+<div id="say" class="sr" aria-live="polite" aria-atomic="true"></div>
+<div id="shout" class="sr" role="alert" aria-atomic="true"></div>
+<script type="application/json" id="off-texts">__OFFLINE__</script>
+<datalist id="peopleList"></datalist><datalist id="roomList"></datalist>
+</body>
+</html>

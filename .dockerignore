@@ -1,0 +1,38 @@
+# The image needs only pyproject.toml, README.md, LICENSE, THIRD_PARTY_NOTICES.md and
+# netwarden/ (see Dockerfile).
+# Never: secrets, databases, backups, logs, internal notes, caches.
+.env
+.env.*
+*.env
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+netwarden-backup-*.json
+launch/
+CLAUDE.local.md
+backups/
+*.tgz
+.git/
+.github/
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.cache/
+.pytest_cache/
+tests/
+docs/
+deploy/
+ha-addon/
+repository.yaml
+scripts/
+AdGuardHome*
+.DS_Store
+Thumbs.db
+_*

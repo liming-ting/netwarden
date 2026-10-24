@@ -1,0 +1,56 @@
+# netwarden - Home Assistant add-on (round 6, stage H). Decisions + sources:
+# docs/dev/ha_addon.md. The image is built from the repo's Dockerfile (target `addon`)
+# by .github/workflows/docker.yml and pulled as <image>:<version>.
+name: netwarden
+version: "0.1.0"
+slug: netwarden
+description: >-
+  AI home-network manager: see the devices on your network, watch who they talk to
+  (via AdGuard Home or Pi-hole) and get it explained in plain language. Read-only.
+url: https://github.com/liming-ting/netwarden
+image: ghcr.io/liming-ting/netwarden-addon
+# = the platforms the release job builds (linux/amd64, linux/arm64, linux/arm/v7)
+arch:
+  - amd64
+  - aarch64
+  - armv7
+startup: application
+boot: auto
+# The image has no init of its own (no s6-overlay): let Docker add one (tini). It
+# forwards SIGTERM to netwarden and reaps the ping / ip children of discovery.
+init: true
+# Discovery (ARP table, ping sweep, mDNS / SSDP) needs the home network itself, not
+# Docker's bridge. No privileged mode, no extra capabilities, no host devices.
+host_network: true
+ingress: true
+ingress_port: 8787
+panel_icon: mdi:shield-search
+panel_title: netwarden
+panel_admin: true
+# No Supervisor or Home Assistant API access: netwarden never talks to them.
+hassio_api: false
+homeassistant_api: false
+# /data (the database, settings, pairing sessions) is part of Home Assistant backups.
+# cold = the add-on is stopped while the backup is taken: a consistent SQLite file.
+backup: cold
+options:
+  dns_source: adguard
+  offline_ai: false
+  lan_access: false
+schema:
+  language: list(zh-Hant|en|zh-Hans|es|pt-BR|ja|de|fr|ko|ru|id|hi)?
+  timezone: str?
+  dns_source: list(adguard|pihole)
+  adguard_url: url?
+  adguard_user: str?
+  adguard_password: password?
+  pihole_url: url?
+  pihole_password: password?
+  ntopng_url: url?
+  ntopng_user: str?
+  ntopng_password: password?
+  anthropic_api_key: password?
+  ai_api_key: password?
+  offline_ai: bool
+  lan_access: bool
+  retention_days: int(8,3650)?

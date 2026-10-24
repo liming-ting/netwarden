@@ -1,0 +1,27 @@
+# Keep the GitHub Actions used by the workflows and the Dockerfile's base image up to date,
+# weekly, with minor/patch updates grouped into one pull request per ecosystem (majors stay
+# separate, they may need workflow changes). netwarden has no Python runtime dependencies by
+# design (pyproject `dependencies = []`), so there is no pip ecosystem to watch.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
+
+  # python:3.12-slim-bookworm in the Dockerfile (both images). 3.12 -> 3.13 counts as a
+  # "minor" update but changes the Python both images run: never proposed here (bumped by
+  # hand, with the CI matrix and the release `tests` job in docker.yml); only patches.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      docker:
+        update-types: ["patch"]

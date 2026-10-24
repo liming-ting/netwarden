@@ -1,0 +1,95 @@
+# Tests on pushes to main, version tags, pull requests and by hand. No secrets, no network
+# beyond fetching the actions and Python itself: the suite uses fake servers on ephemeral
+# 127.0.0.1 ports only.
+#
+# Actions minutes: a normal push or pull request tests the oldest and the newest supported
+# Python (3.11 + 3.15, ~4 min each); a v* tag and a manual run (workflow_dispatch) test
+# every version in between too. Nothing to cache: there are no dependencies to install.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject.toml requires-python = ">=3.11"; up to the newest stable release
+        # (3.15.0 final: 2026-10-09; stable on the hosted runners, no pre-releases here)
+        python: ${{ fromJSON((startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && '["3.11", "3.12", "3.13", "3.14", "3.15"]' || '["3.11", "3.15"]') }}
+    env:
+      TZ: UTC
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile
+        run: python3 -m compileall -q netwarden
+      - name: Locale check
+        run: python3 -m netwarden.i18n --check
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests
+
+  js:
+    name: map layout (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "lts/*"
+      - name: Map layout test
+        run: node tests/js/map_layout_test.js
+
+  # sdist + wheel build (setuptools from PyPI, as `pip install .` would fetch it) and the
+  # PEP 639 license metadata in the wheel
+  package:
+    name: build sdist + wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python3 -m pip install --disable-pip-version-check build
+          python3 -m build --outdir dist .
+      - name: License metadata
+        run: |
+          python3 - <<'EOF'
+          import glob, zipfile
+          whl = zipfile.ZipFile(glob.glob("dist/*.whl")[0])
+          meta = next(n for n in whl.namelist() if n.endswith(".dist-info/METADATA"))
+          text = whl.read(meta).decode()
+          print(text.split("\n\n", 1)[0])
+          assert "License-Expression: AGPL-3.0-or-later" in text
+          assert "License-File: LICENSE" in text
+          assert any(n.endswith(".dist-info/licenses/LICENSE") for n in whl.namelist())
+          assert "Classifier: License ::" not in text
+          EOF

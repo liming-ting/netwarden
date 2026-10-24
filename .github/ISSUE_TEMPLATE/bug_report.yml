@@ -1,0 +1,85 @@
+name: Bug report
+description: Something does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Security problems belong in a private report instead (see SECURITY.md).
+        Please do not paste real MAC/IP addresses, hostnames, API keys or passwords - replace them
+        with examples such as 192.168.1.10 or aa:bb:cc:00:00:01.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start with ...
+        2. Open ...
+        3. See ...
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - Docker compose
+        - Home Assistant add-on
+        - Linux / Raspberry Pi (scripts/install_linux.sh)
+        - pip / pipx
+        - From a checkout (python3 -m netwarden)
+        - Windows / WSL2
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: netwarden version
+      description: Output of `netwarden --version` (or `python3 -m netwarden --version`).
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system / platform
+      placeholder: "Debian 12 on Raspberry Pi 4, Home Assistant OS 14, Windows 11 + WSL2 Ubuntu 24.04, ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: dns
+    attributes:
+      label: DNS source
+      options:
+        - AdGuard Home
+        - Pi-hole v6
+        - None configured
+    validations:
+      required: true
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI mode
+      description: Shown on the AI assistant page or in /api/meta (ai_mode).
+      options:
+        - Offline (no model)
+        - Local / LAN OpenAI-compatible server (Ollama, LM Studio, ...)
+        - Anthropic (cloud)
+        - Not relevant
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and language (for dashboard problems)
+      placeholder: "Firefox 131 on Android, zh-Hant"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or `netwarden status` output
+      description: Remove anything private first. Will be shown as code.
+      render: text

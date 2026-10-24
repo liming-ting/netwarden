@@ -1,0 +1,44 @@
+# netwarden alone, next to a DNS filter you already run (AdGuard Home or Pi-hole v6).
+#
+#   cp deploy/netwarden.env.example deploy/netwarden.env   # then fill in your DNS filter
+#   docker compose -f deploy/compose.yaml up -d
+#   docker compose -f deploy/compose.yaml logs netwarden   # the one-time admin code
+#
+# Linux: host networking, because discovery needs to SEE the LAN - the ARP table, ping,
+# mDNS / SSDP multicast and the router's UPnP. In a bridge network the container only
+# sees Docker's own virtual network. Docker Desktop (Windows / macOS) runs containers in
+# a VM, so even "host" is the VM's network: device discovery and names see little or
+# nothing there; DNS ingestion from AdGuard / Pi-hole, the AI explanations and the
+# dashboard still work. Use deploy/compose.bridge.yaml there. docs/install.md has more.
+services:
+  netwarden:
+    image: ghcr.io/liming-ting/netwarden:latest     # or `build: ..` to build from this checkout
+    container_name: netwarden
+    restart: unless-stopped
+    init: true                            # tini as PID 1: clean signals, no zombies
+    network_mode: host
+    env_file:
+      - path: ./netwarden.env             # ADGUARD_URL / PIHOLE_URL, keys, language ...
+        required: false
+    environment:
+      # host networking: listen on loopback + the detected LAN address only (not on every
+      # interface, e.g. a VPN), LAN mode = other devices must pair
+      NETWARDEN_HOST: "127.0.0.1"
+      NETWARDEN_LAN: "1"
+      NETWARDEN_PORT: "8787"
+    volumes:
+      - netwarden-data:/data
+    # Optional: lets `ping` use raw sockets when the host's net.ipv4.ping_group_range
+    # does not allow unprivileged ping. Without it netwarden falls back to TCP probes.
+    # cap_add: [NET_RAW]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  netwarden-data:
