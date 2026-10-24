@@ -106,6 +106,30 @@ contain breaking changes).
 - Internationalized domain names are stored in one (ASCII) form for every source.
 - One ingest run reads at most 100,000 queries, so a first run on a very large log
   stays within memory.
+- Switching the language and back no longer leaves cards (summaries, names, score,
+  next steps, privacy) in the previous language until a reload; open drawers and the
+  "since your last visit" card follow the new language too.
+- After a language switch the assistant keeps earlier messages as they were, under a note
+  saying which language they are in, and hides their old-language follow-up questions.
+- Offline mode: "Ask AI about this device" gives the full device profile (risky domains,
+  open ports, router port forwards) in every language - in Chinese and Japanese it used to
+  list only the top domains; the chat's standing questions ("Which devices are active at
+  night?", "What changed this week?", "Which device is the most unusual?") get their own
+  answers, the same in every language, instead of the general summary or an unrelated one.
+- Offline answers: service names in the answer's language (as in the device drawer),
+  "1 more person" / "1 new device" instead of "1 more people" / "device(s)", and the
+  screen-time note shown in italics instead of with literal underscores.
+- Offline answers: "Was the internet down recently?" names the period its numbers cover
+  (the Network health page shows the last 24 h, the answer the last 7 days); "Which device
+  is the most unusual right now?" names one device first; night activity lines no longer
+  repeat the device name; the "tap one" heading is shown only together with its questions
+  (it was left empty after a language switch).
+- A language switch while an open device drawer was still loading is no longer lost.
+- Suggestions follow each language's singular/plural rule (e.g. Russian "21 устройство").
+- A nameless device with a private address is titled in its drawer with the name it
+  announces (as in the device list), not its vendor.
+- Demo: the made-up internet outage always ends well before the "right now" hour of the
+  health card, so it no longer reports most DNS lookups failing right now.
 
 ## [0.1.0] - 2026-10-24
 

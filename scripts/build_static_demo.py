@@ -411,7 +411,8 @@ def demo_hint(sse: bytes, lang: str) -> bytes:
 def device_name(dev: dict, lang: str) -> str:
     """The name a device drawer puts in its "Ask AI about this device" question (app.js
     dname(); only the answer's wording depends on it - the page finds the answer by MAC)."""
-    ti, ident = dev.get("type_info") or {}, dev.get("ident") or {}
+    ti = dev.get("type_info") or {}
+    ident = dev.get("ident") or dev.get("identity") or {}   # a list row | /api/device
     name = dev.get("name") or ident.get("name") or dev.get("vendor")
     if name:
         return name

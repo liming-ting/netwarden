@@ -479,11 +479,12 @@ def localize(item: dict, lang: str, names: dict | None = None) -> dict:
     for plat in KINDS[kind][0]:
         text = i18n.t(f"sug.{kind}.steps.{plat}", lang, **p)
         steps[plat] = [s.strip() for s in text.split("\n") if s.strip()]
-    one = item["params"].get("n") == 1   # "1 devices" -> a singular text where one exists
-
     def text(part):
+        # a count: the language's own singular rule ("1 device", ru "21 устройство")
         key = f"sug.{kind}.{part}"
-        return i18n.t(key + "_one" if one and i18n.has(key + "_one") else key, lang, **p)
+        if "n" not in p:
+            return i18n.t(key, lang, **p)
+        return i18n.tn(key, p["n"], lang, **{k: v for k, v in p.items() if k != "n"})
     return {**item, "title": text("title"),
             "why": text("why"),
             "done_title": i18n.t(f"sug.{kind}.done", lang, **p),

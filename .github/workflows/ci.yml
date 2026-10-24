@@ -91,6 +91,8 @@ jobs:
         run: node tests/js/palette_match_test.js
       - name: Static demo request map test
         run: node tests/js/static_demo_test.js
+      - name: Chat markdown test
+        run: node tests/js/chat_md_test.js
 
   # sdist + wheel build (setuptools from PyPI, as `pip install .` would fetch it) and the
   # PEP 639 license metadata in the wheel

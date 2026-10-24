@@ -59,7 +59,8 @@ evening; the home's ordinary lookups are echoed one week back, so "this week vs 
 week" compares like with like: screen time up ~30%.
 
 Stage H: 48 h of one-a-minute router pings (a few ms, own RNG). Last night 02:13-02:20
-(local) the internet went down while the router kept answering - the camera's lookups
+(local; 00:13 when built between 02:13 and 03:50, so it ends well before the headline's last hour
+and stays in the last 24 h) the internet went down while the router kept answering - the camera's lookups
 came back SERVFAIL -> an "ISP" outage; yesterday 19:41 the router itself stopped
 answering for 3 minutes -> a "router" blip. AdGuard's own counters (meta), a few
 suggestions already done / dismissed (seeded once, like the owners) and two weeks of
@@ -913,13 +914,35 @@ DNS_STATS = {"queries": 6412, "blocked": 803, "avg_ms": 11.6,
              "upstreams": [("192.168.1.1:53", 14.2)]}
 
 
+# Round 10c: the ISP outage always ENDS at least ISP_CLEAR before the demo's "now" - the
+# health headline judges the last hour (nethealth._compute, "x% of DNS lookups are failing
+# right now"), so an outage inside it contradicted the page's own "last outage 02:13-02:20"
+# - and still within the last 24 h (the alerts' window). A demo built 02:13-03:50 (local)
+# cannot have both at 02:13, so that night's outage is at ISP_EARLY instead.
+ISP_CLEAR = timedelta(minutes=90)
+ISP_EARLY = (0, 13)
+
+
+def isp_outage_start(now: datetime, tz) -> datetime:
+    """The made-up ISP outage's start (local) for a demo built at `now`."""
+    local, utc_now = now.astimezone(tz), now.astimezone(timezone.utc)
+    n = ISP_OUTAGE[2]
+    for h, m in (ISP_OUTAGE[:2], ISP_EARLY):
+        start = local.replace(hour=h, minute=m, second=0, microsecond=0)
+        # compared in UTC: aware datetimes in one zone compare by wall clock, which is off
+        # by an hour on a clock-change night; a wall time is moved by whole days on the wall
+        if start.astimezone(timezone.utc) > utc_now:
+            start = (start.replace(tzinfo=None) - timedelta(days=1)).replace(tzinfo=tz)
+        if (start + timedelta(minutes=n)).astimezone(timezone.utc) <= utc_now - ISP_CLEAR:
+            return start
+    return start     # (not reached: ISP_EARLY that night always ended in time)
+
+
 def _incidents(now: datetime, tz) -> list:
     """[(start UTC, minutes, kind)] for the ISP outage and the router blip."""
     local = now.astimezone(tz)
-    h, m, n = ISP_OUTAGE
-    isp = local.replace(hour=h, minute=m, second=0, microsecond=0)
-    if isp > local - timedelta(minutes=15):
-        isp -= timedelta(days=1)
+    n = ISP_OUTAGE[2]
+    isp = isp_outage_start(now, tz)
     h, m, b = ROUTER_BLIP
     blip = (local - timedelta(days=1)).replace(hour=h, minute=m, second=0, microsecond=0)
     return [(isp.astimezone(timezone.utc), n, "isp"), (blip.astimezone(timezone.utc), b, "router")]

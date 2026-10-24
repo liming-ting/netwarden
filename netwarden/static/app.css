@@ -466,6 +466,7 @@ textarea.rule { width: 100%; height: 104px; font: 12px/1.5 var(--mono); backgrou
 .tooljson { margin: 4px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg);
             font: 11px/1.45 var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-sm); padding: var(--s2); }
 .suggest.inmsg { margin-top: var(--s2); }
+.sug-head { margin-top: var(--s3); }
 /* Round 7 C: "about N tokens · ~US$x" under an answer, the budget warning, the Settings bar */
 .usage { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--mut); }
 .usage > summary { display: inline-flex; align-items: flex-start; gap: 6px; cursor: pointer; list-style: none; border-radius: var(--r-xs); }

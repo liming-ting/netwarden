@@ -500,7 +500,7 @@ def t_top_domains(ctx: Ctx, a: dict) -> dict:
     out = []
     private = bool(scope.get("person")) and not presence_on(ctx, scope["person"])
     for r in rows:
-        svc, cat = services.classify(r["domain"])
+        svc, cat = services.lookup(r["domain"])   # the id: named in ctx.lang, like the drawer
         d = {"domain": r["domain"], "lookups": r["n"], "blocked": r["b"] or 0,
              "service": services.service_name(svc, ctx.lang) if svc else None, "category": cat,
              "first_local": None if private else ctx.local(r["f"]),

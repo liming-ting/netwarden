@@ -26,6 +26,16 @@ ISO = "%Y-%m-%dT%H:%M:%S.%fZ"
 NOW = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
 CAM = "a0:43:b0:9f:21:5e"
 
+
+def isp_clock(db) -> str:
+    """The demo ISP outage's local start ("02:13"; "00:13" for a demo built 02:13-03:50,
+    demo.isp_outage_start - round 10c)."""
+    from netwarden import activity
+    ts = db.execute("SELECT start_ts FROM outages WHERE cause = 'isp'").fetchone()[0]
+    clock = datetime.strptime(ts, ISO).replace(tzinfo=timezone.utc).astimezone(activity.local_tz()).strftime("%H:%M")
+    assert clock in ("02:13", "00:13", "03:13"), clock    # 03:13: a spring-forward night
+    return clock
+
 IPUTILS = """PING 192.168.1.1 (192.168.1.1) 56(84) bytes of data.
 
 --- 192.168.1.1 ping statistics ---
@@ -397,7 +407,7 @@ class DemoStoryTests(unittest.TestCase):
         else:
             self.assertEqual(rep["verdict"]["level"], "ok")
         texts = [o["text"] for o in rep["outages"]]
-        self.assertTrue(any("02:13" in t and "ISP" in t for t in texts), texts)
+        self.assertTrue(any(isp_clock(self.db) in t and "ISP" in t for t in texts), texts)
         self.assertTrue(any("19:41" in t and "router" in t for t in texts), texts)
         self.assertTrue(rep["gateway"]["series"])
         self.assertEqual(rep["server"]["server"], "adguard")
@@ -438,14 +448,14 @@ class DemoStoryTests(unittest.TestCase):
     def test_llm_snapshot_has_network_health(self):
         nh = brain.snapshot(self.db)["network_health"]
         self.assertEqual(sorted(o["probable_cause"] for o in nh["outages_7d"]), ["isp", "router"])
-        self.assertTrue(any(o["start"].endswith("02:13") for o in nh["outages_7d"]))
+        self.assertTrue(any(o["start"].endswith(isp_clock(self.db)) for o in nh["outages_7d"]))
         self.assertNotIn("network_health", brain.snapshot(store.connect(":memory:")))
 
     def test_offline_ai_and_digest_mention_the_outage(self):
         text = offline_ai.summarize(self.db, brain.snapshot(self.db), "en", None, None)
-        self.assertIn("02:13", text)
+        self.assertIn(isp_clock(self.db), text)
         digest = alerts.render_digest(alerts.compute(self.db), "en")
-        self.assertIn("02:13", digest)
+        self.assertIn(isp_clock(self.db), digest)
 
 
 class WebTests(unittest.TestCase):
@@ -538,7 +548,9 @@ class CliTests(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 rc = cli.main(["health", "--db", str(p), "--lang", "en"])
             self.assertEqual(rc, 0)
-            self.assertIn("02:13", out.getvalue())
+            db = store.connect(p)
+            self.assertIn(isp_clock(db), out.getvalue())
+            db.close()
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 cli.main(["health", "--db", str(p), "--json", "--rebuild", "3"])

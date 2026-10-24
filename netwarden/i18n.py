@@ -138,6 +138,26 @@ def t(key: str, lang: str = DEFAULT, **kw) -> str:
     return text.format_map(_Keep(kw))
 
 
+# Which counts take a language's singular ("_one") form - CLDR's "one" category, kept to
+# the languages netwarden ships: French, Brazilian Portuguese and Hindi count 0 and 1 as
+# one, Russian 1, 21, 31 ... (not 11); the rest only 1. Languages without grammatical number
+# (zh, ja, ko, id) simply carry the same text under both keys.
+_ONE = {"fr": lambda n: n in (0, 1), "pt-BR": lambda n: n in (0, 1), "hi": lambda n: n in (0, 1),
+        "ru": lambda n: n % 10 == 1 and n % 100 != 11}
+
+
+def tn(key: str, n, lang: str = DEFAULT, **kw) -> str:
+    """t() for a text about a count `n` ({n} is filled in): `key + "_one"` when the
+    language says "1 device" rather than "2 devices" and that key exists, else `key`."""
+    code = lang if lang in _catalog() else normalize(lang)
+    try:
+        one = _ONE.get(code, lambda v: v == 1)(int(n))
+    except (TypeError, ValueError):
+        one = False
+    use = key + "_one" if one and (key + "_one") in _catalog()[code] else key
+    return t(use, code, **{"n": n, **kw})
+
+
 def has(key: str) -> bool:
     """Is `key` defined (in the English reference locale)?"""
     return key in _catalog().get(FALLBACK, {})

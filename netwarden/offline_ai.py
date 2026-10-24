@@ -282,8 +282,8 @@ def section_focus(ctx) -> list:
         lines.append(tr("focus_type", type=devicetype.type_name(d["type"], lang)))
     if d.get("services"):
         lines.append(tr("focus_services", services=sep.join(d["services"][:6])))
-    lines.append(tr("focus_queries", queries=d["queries"], blocked=d.get("blocked") or 0,
-                    h=f"{snap['window_hours']:g}"))
+    lines.append(i18n.tn("offline.focus_queries", d["queries"], lang, queries=d["queries"],
+                         blocked=d.get("blocked") or 0, h=f"{snap['window_hours']:g}"))
     if d.get("privacy"):
         lines.append(tr("focus_privacy", grade=d["privacy"]["grade"],
                         pct=round(100 * d["privacy"]["tracker_share"])))
@@ -292,7 +292,7 @@ def section_focus(ctx) -> list:
                                                       for p in d["open_ports"])))
     risky = [t["domain"] for t in ctx["alerts"]["threats"] if t["mac"] == mac]
     if risky:
-        lines.append(tr("focus_threats", n=len(risky), domains=sep.join(risky[:5])))
+        lines.append(i18n.tn("offline.focus_threats", len(risky), lang, domains=sep.join(risky[:5])))
     if d.get("active_hours"):
         lines.append(tr("focus_hours", hours=d["active_hours"]))
     return lines
@@ -301,12 +301,16 @@ def section_focus(ctx) -> list:
 def asks_about_focus(question: str | None, lang: str, focus: str | None) -> bool:
     """Is `question` the device drawer's pre-filled "Ask AI about this device" question
     (app.ask_prefill) for `focus`, with any name? The focus section answers exactly that,
-    so the "cannot answer free-form questions" note would contradict the answer."""
+    so the "cannot answer free-form questions" note would contradict the answer. Any
+    language's wording counts (the box may have been filled before a language switch)."""
     if not (question and focus):
         return False
-    tpl = i18n.t("app.ask_prefill", lang).replace("{mac}", focus)
-    rx = r"\s*" + r".+?".join(re.escape(p) for p in tpl.split("{name}")) + r"\s*"
-    return re.fullmatch(rx, question, re.I | re.S) is not None
+    for code in dict.fromkeys([i18n.normalize(lang)] + i18n.CODES):
+        tpl = i18n.t("app.ask_prefill", code).replace("{mac}", focus)
+        rx = r"\s*" + r".+?".join(re.escape(p) for p in tpl.split("{name}")) + r"\s*"
+        if re.fullmatch(rx, question, re.I | re.S) is not None:
+            return True
+    return False
 
 
 # the chat's own standing suggestion chips (app.js, the static demo builder): the summary

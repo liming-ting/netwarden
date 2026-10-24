@@ -153,7 +153,7 @@ class SingularSuggestionTests(unittest.TestCase):
             one = suggestions.localize(suggestions._item(kind, "low", {"n": 1}), "en")
             two = suggestions.localize(suggestions._item(kind, "low", {"n": 2}), "en")
             self.assertNotIn("1 devices", one["title"] + one["why"])
-            self.assertEqual(one["title"], i18n.t(f"sug.{kind}.title_one", "en"))
+            self.assertEqual(one["title"], i18n.t(f"sug.{kind}.title_one", "en", n=1))
             self.assertIn("2 devices", two["title"] + two["why"])
 
     def test_every_one_variant_has_a_base_text(self):

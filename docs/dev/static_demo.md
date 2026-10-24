@@ -89,6 +89,19 @@ only the static build's index.html has either. In the real app nothing changes (
   same reader as a live answer); others get the `app.demo.chat_only` note. "Ask AI about
   this device" -> Ask: when the question is still exactly the pre-filled one, the device's
   own answer (looked up by MAC, so the page needs no copy of the name in the text).
+  Round 10c: the standing chips (`app.ai.s1..s3`) have intent answers of their own
+  (`ai_intents.STANDING`: alerts / new devices + changes / night), saved like the others.
+- Language switch (round 10c, real app too): the page holds ONE copy of the data, so the
+  ETags are per dataset (`lastTag[k]`) and `setLang()` forgets them all (`forgetTags()`):
+  a static host's 304 for `en/overview.json` can never keep the other language's data on
+  screen. Earlier chat messages keep their language (`m.lang`) under `app.chat.other_lang`.
+  A `refresh()` that was running when the language changed (e.g. awaiting an open
+  drawer's `loadDevice`) checks `lang !== S.lang` at its end and runs again.
+- Offline answers end with a "tap one" heading (`offline.try_these`) when they carry
+  chips: on the `suggest` SSE event the page moves that last paragraph into `m.sugHead`
+  and shows it only with the chips (hidden for other-language messages / filtered demo
+  chips). Counts go through `i18n.tn` - suggestions too (`sug.<kind>.*_one` carry `{n}`).
+  The health intent names its window (`intent.health_head`; the health page = last 24 h).
 - The assistant's subtitle is `app.demo.ai_mode` ("demo: saved answers, no AI is
   called"), never the real app's "chosen with --offline-ai".
 - A 404 without a message reads `app.demo.not_found` ("not part of the demo") with a

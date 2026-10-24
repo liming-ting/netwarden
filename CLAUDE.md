@@ -119,11 +119,9 @@ tests/    unittest (fake providers/servers on ephemeral 127.0.0.1); js/map_layou
 Sessions, `SourceError(kind)` -> `conntest.ERROR_KINDS`, `*_VERIFY_TLS`: docs/dev/integrations.md (round 9 V). Only the SELECTED source is
 "configured". `blocked` 0/1 + nullable `block_reason`. Devices keyed by **MAC**; events/samples keep raw IP *and* MAC
 at ingest time. Traffic samples are **cumulative** (decrease = reset). The API key never reaches the browser.
-
 **i18n:** snapshot/alerts data is canonical English + stable keys; localized at the edge (`web.py` `?lang=` / POST
 `"lang"`, `/api/locale`, `alerts.render_digest(r, lang)`). **Add a language** = copy `locales/en.json` to `<code>.json`,
 translate (keep `{placeholders}`), set `_meta`; `python3 -m netwarden.i18n [--check]` (+ `locale_same_ok.json`) + tests.
-
 **Operations (Stage C):**
 - Every ingest/traffic/discovery run goes through `*_recorded()` -> `source_status` (errors via
   `health.sanitize_error`). New source = `health.SOURCES` + `status.src.<name>` / `status.hint.<name>_*` + `runner.plan()` loop.
@@ -131,11 +129,9 @@ translate (keep `{placeholders}`), set `_meta`; `python3 -m netwarden.i18n [--ch
 - `--offline-ai` on run/web = the SAFE way to exercise the AI UI (confirm `/api/meta` ai_mode == "offline" first).
 - Exports `/api/export/devices.csv` + `/report.md`. Retention `NETWARDEN_RETENTION_DAYS` (90, >= 8); devices/labels/acks/
   port_checks never pruned. Logs `data/netwarden.log`. Loops never call the LLM.
-
 **Stages D1 / D2 / E2** - docs/dev/stages.md. **All POSTs require `content-type: application/json`**
 (415). Ack keys `port:<n>`, `visibility:bypass|quiet`, `activity:night`, `bandwidth:spike`,
 `upnp:<P>:<n>`, Q `mute:|less:<kind>`; `(mac, '')` = trust device. Owner/room/announced names = hostile text: esc() always.
-
 **Dashboard (Stage E1):** `/static/<name>` whitelisted, ETag, `__V__` asset hash (static/ is
 re-checked every 2 s; restart after editing locales/), CSP `script-src 'self'`.
 - **Navigation (Stage U, docs/dev/usability.md):** `GROUPS` = 7 places with sub-tabs (`subTabs()`); every page keeps its
@@ -194,8 +190,8 @@ that PEER = HA admin; X-Ingress-Path/X-Forwarded-* read from it only. URLs are b
 relative manifest/css, sw.js scope): NEVER add a root-absolute URL to static/. Tests: tests/ingress_proxy.py.
 **Static demo (round 9 W)** - docs/dev/static_demo.md: `DEMO` in app.js ONLY with data-static-demo + static/demo.js (`NWDemo.file` = builder
 `static_name`, fixture-pinned); a NEW GET the page makes = add it to the builder (`PAGES`/`DEVICE_GETS`) or it 404s there; DEMO never POSTs.
-10b: names = `demo.HOUSEHOLDS` (zh-Hant|zh-Hans|en, `household_for`; DB keeps its first) -> ONE home per household; manifest NO id;
-`demo_hint()` swaps the offline title/enable hint in saved answers. Offline reason forced|addon|chosen|no_key (`brain.ai_config`).
+10b/10c (details in static_demo.md): `demo.HOUSEHOLDS`; ONE copy of data, `lastTag[k]` per dataset + `forgetTags()` on setLang (never per
+language); chat messages carry `lang`; counts ONLY via `i18n.tn` (+ `<key>_one` with `{n}`); demo ISP outage ends >= `demo.ISP_CLEAR` ago.
 **Push (round 10 N)** - docs/notifications.md: tables push_channels (secrets column: NEVER in API/log/backup; log = shown_endpoint)
 / push_outbox (UNIQUE(channel,key) = dedupe + queue; new/resumed channel PRIMED) / push_log; admin-only `web.PUSH_GETS|POSTS`;
 levels minimal|standard|detailed (scrub() + hashed id below detailed); env `NETWARDEN_NOTIFY_<n>_*` read-only (absent = row STALE, never
@@ -221,14 +217,14 @@ python3 -m netwarden notify list | test NAME | send-digest [--daily]   # push ch
 NETWARDEN_HEADLESS=1 NETWARDEN_HOST=0.0.0.0|<lan-ip> python3 -m netwarden run   # container mode; --version
 bash scripts/adguard_dev.sh start; python3 scripts/dns_traffic.py   # DEV AdGuard (DNS :5354, API :3000); never for users
 python3 -m netwarden.web --db data/demo.db; python3 -m netwarden.alerts --db data/demo.db  # must work; perf_db.py / soak.py: perf
-python3 -m unittest discover -s tests          # 1351 tests, all must pass (+ node tests/js/*.js)
+python3 -m unittest discover -s tests          # 1372 tests, all must pass (+ node tests/js/*.js)
 ```
 Windows: `scripts\start_windows.cmd` (:8787) / `start_demo_windows.cmd` (:8788). Manual checks: own `--offline-ai` server on 127.0.0.1:8799, COPY of the demo DB.
 
 ## Status & next steps
 
 **Done:** MVP, i18n, demo; stages C P D1 D2 E1/E2 V L N F H M X V3 V4 Q A T U G K + review fixes; rounds 6 D/H/O/P/E, 7 L/C, 8 R,
-CI1, 9 V/U/X/W, 10 N/P, 10b (tests `test_round*.py`). Standing rules from them: third-party code only in netwarden/vendor/, downloaded
+CI1, 9 V/U/X/W, 10 N/P, 10b, 10c (tests `test_round*.py`). Standing rules from them: third-party code only in netwarden/vendor/, downloaded
 data (manuf, threat feed) never in tree/wheel/image; AI cost (docs/dev/ai_cost.md): no cache breakpoint on the snapshot, `usage.Guard`
 before EVERY tool round, re-check prices + bump PRICES_CHECKED; ghcr.io/liming-ting/netwarden + netwarden-addon (lower case);
 AGPL-3.0-or-later, LICENSE hash-pinned (NEVER edit, no per-file headers), `netwarden.LICENSE|SOURCE_URL|COPYRIGHT` = ONE source; images

@@ -34,13 +34,16 @@ function html(strs, ...vals) {
   return new Html(out);
 }
 // Tiny markdown for AI answers, applied AFTER escaping (so it can only ever add these few
-// tags): "# heading" lines -> bold, "- item" / "* item" -> "• item", **bold**, `code`,
-// line breaks. Links and raw HTML stay plain text.
+// tags): "# heading" lines -> bold, "- item" / "* item" -> "• item", **bold**, _em_ / *em*,
+// `code`, line breaks. Links and raw HTML stay plain text. (tests/js/chat_md_test.js)
 function md(t) {
   return new Html(esc(t)
     .replace(/^#{1,6}[ \t]+(.+)$/gm, '<strong>$1</strong>')
     .replace(/^([ \t]*)[-*][ \t]+/gm, '$1• ')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // _emphasis_ / *emphasis* (an LLM's, the screen-time note's) - only between spaces or
+    // line ends, so snake_case names and a lone "*" stay as they are
+    .replace(/(^|[\s(])([_*])(?![\s_*])([^_*\n]*?[^\s_*])\2(?=$|[\s).,!?:;。,、])/gm, '$1<em>$3</em>')
     .replace(/`([^`\n]+?)`/g, '<code>$1</code>').replace(/\n/g, '<br>'));
 }
 const enc = encodeURIComponent;
@@ -320,9 +323,11 @@ const grade = (g, big) => (g ? html`<span class="grade g-${g}${big ? ' big' : ''
 const devHref = mac => '#/device/' + enc(mac);
 function dname(d) {
   // label > hostname > what it announced on the LAN (mDNS / SSDP) > vendor, like the
-  // server's store.device_names
+  // server's store.device_names. An inventory row carries the announced name as `ident`,
+  // /api/device (the drawer) as `identity`: both, so the drawer's title is the list's name.
   if (d && d.name) return d.name;
   if (d && d.ident && d.ident.name) return d.ident.name;
+  if (d && d.identity && d.identity.name) return d.identity.name;
   if (d && d.vendor) return d.vendor;
   // two nameless private-address phones must not read the same: "Phone · Mom"
   const tn = d && d.type_info && d.type && d.type !== 'unknown' ? d.type_info.type_name : '';
@@ -1974,15 +1979,59 @@ function chatMsg(m, i) {
     ${m.pending && m.content && !m.status ? html`<span class="caret" aria-hidden="true"></span>` : ''}
     ${(m.notes || []).map(n => html`<div class="msg-note">${icon('i-bulb')}<span>${n}</span></div>`)}
     ${ai && !m.pending ? usageNote(m, i) : ''}
-    ${m.suggest && m.suggest.length && !m.pending ? html`<div class="suggest inmsg" role="group" aria-label="${T('app.chat.suggested')}">${m.suggest.map(s => html`<button type="button" class="chip" data-act="suggest" data-text="${s}"${S.chat.busy ? ' disabled' : ''}>${s}</button>`)}</div>` : ''}
+    ${m.suggest && m.suggest.length && !m.pending && !otherLang(m) ? html`${m.sugHead ? html`<div class="sug-head">${md(m.sugHead)}</div>` : ''}<div class="suggest inmsg" role="group" aria-label="${T('app.chat.suggested')}">${m.suggest.map(s => html`<button type="button" class="chip" data-act="suggest" data-text="${s}"${S.chat.busy ? ' disabled' : ''}>${s}</button>`)}</div>` : ''}
     ${m.stopped ? html`<div class="msg-note">${T('app.chat.stopped')}</div>` : ''}
     ${m.err ? html`<div class="msg-note err" role="alert">${icon('i-alert')}<span>${T('app.chat.error', { error: m.err })}</span>
       ${last ? html`<button type="button" class="btn sm ghost" data-act="chat-retry">${icon('i-refresh')}${T('app.chat.retry')}</button>` : ''}</div>` : ''}
   </div>`;
 }
+// Round 10c: a message remembers the language it was written in. After a language switch
+// the earlier ones stay as they were (an answer cannot be re-worded without asking again),
+// under one small note naming their language; their follow-up chips (old-language
+// questions) are hidden. Everything netwarden itself labels follows the new language.
+function langName(code) { const l = ((S.meta && S.meta.languages) || []).find(x => x.code === code); return l ? l.name : code; }
+const otherLang = m => !!(m.lang && m.lang !== S.lang);
 function chatLog() {
   const c = S.chat;
-  return c.messages.length ? c.messages.map(chatMsg) : empty('i-spark', T('app.ai.empty'), T('ui.chat_hint'));
+  if (!c.messages.length) return empty('i-spark', T('app.ai.empty'), T('ui.chat_hint'));
+  const out = [];
+  c.messages.forEach((m, i) => {
+    const prev = c.messages[i - 1];
+    if (otherLang(m) && !(prev && prev.lang === m.lang)) {
+      out.push(html`<div class="msg-note lang-note" data-key="ln${i}">${icon('i-globe')}<span>${T('app.chat.other_lang', { lang: langName(m.lang), now: langName(S.lang) })}</span></div>`);
+    }
+    out.push(chatMsg(m, i));
+  });
+  return out;
+}
+const prefill = ctx => T('app.ask_prefill', { name: ctx.name, mac: ctx.mac });
+// setLang(): mark what was said before (stored chats from before round 10c carry no
+// language) and re-word a pre-filled, still unsent device question
+function chatLangChanged(was, oldPrefill) {
+  const c = S.chat;
+  c.messages.forEach(m => { if (!m.lang) m.lang = was; });
+  if (c.ctx && oldPrefill != null && c.draft.trim() === oldPrefill.trim()) setDraft(prefill(c.ctx), oldPrefill);
+  AIQ.at = 0;
+  saveChat();
+}
+function setDraft(text, was) {
+  S.chat.draft = text;
+  const box = $('#chatq'); if (box && box.value.trim() === String(was).trim()) box.value = text;
+}
+// after a refresh: the focused device's name in the data now on screen (another
+// language's demo family, a label set meanwhile); a dropped device drops the chip
+function syncChatCtx() {
+  const c = S.chat;
+  if (!c.ctx || !S.data.inv) return false;
+  const d = findDev(c.ctx.mac);
+  if (!d) { c.ctx = null; saveChat(); return true; }
+  const n = dname(d);
+  if (n === c.ctx.name) return false;
+  const was = prefill(c.ctx);
+  c.ctx.name = n;
+  if (c.draft.trim() === was.trim()) setDraft(prefill(c.ctx), was);
+  saveChat();
+  return true;
 }
 // The chat component, rendered into exactly one place at a time (ids stay unique).
 function chatBox(where) {
@@ -2045,8 +2094,8 @@ function saveChat() {
   const c = S.chat;
   try {
     sessionStorage.setItem(CHAT_KEY, JSON.stringify({ db: dbId(), ctx: c.ctx, draft: c.draft,
-      messages: c.messages.map(m => ({ role: m.role, content: m.content, mode: m.mode, err: m.err, stopped: m.stopped,
-        tools: m.tools, notes: m.notes, suggest: m.suggest, usage: m.usage })) }));
+      messages: c.messages.map(m => ({ role: m.role, content: m.content, mode: m.mode, lang: m.lang, err: m.err, stopped: m.stopped,
+        tools: m.tools, notes: m.notes, suggest: m.suggest, sugHead: m.sugHead, usage: m.usage })) }));
   } catch (e) { /* storage full or disabled: the chat just won't survive a reload */ }
 }
 // Stored chat / notified keys belong to one database (a demo and a real DB can share the
@@ -2057,8 +2106,9 @@ function loadChat() {
     const j = JSON.parse(sessionStorage.getItem(CHAT_KEY) || 'null');
     if (!j || !Array.isArray(j.messages) || j.db !== dbId()) return;
     S.chat.messages = j.messages.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-      .map(m => ({ role: m.role, content: m.content, mode: m.mode, err: typeof m.err === 'string' ? m.err : undefined, stopped: !!m.stopped,
-        tools: cleanTools(m.tools), notes: strList(m.notes, 4), suggest: strList(m.suggest, 6), usage: cleanUsage(m.usage) }));
+      .map(m => ({ role: m.role, content: m.content, mode: m.mode, lang: typeof m.lang === 'string' ? m.lang.slice(0, 20) : undefined, err: typeof m.err === 'string' ? m.err : undefined, stopped: !!m.stopped,
+        tools: cleanTools(m.tools), notes: strList(m.notes, 4), suggest: strList(m.suggest, 6),
+        sugHead: typeof m.sugHead === 'string' ? m.sugHead.slice(0, 500) : undefined, usage: cleanUsage(m.usage) }));
     S.chat.ctx = j.ctx && typeof j.ctx.mac === 'string' ? { mac: j.ctx.mac, name: String(j.ctx.name || j.ctx.mac) } : null;
     S.chat.draft = typeof j.draft === 'string' ? j.draft : '';
   } catch (e) { /* a broken entry: start fresh */ }
@@ -2103,7 +2153,13 @@ async function readAnswer(r, reply, alert) {
         if (x) { (reply.tools = reply.tools || []).length < 10 && reply.tools.push(x); renderChatSoon(); }
       } else if (ev.event === 'note') {
         if (typeof d.text === 'string' && !(reply.notes || []).includes(d.text)) { (reply.notes = reply.notes || []).push(d.text.slice(0, 500)); renderChatSoon(); }
-      } else if (ev.event === 'suggest') { reply.suggest = demoAnswerable(strList(d.questions, 6)); }
+      } else if (ev.event === 'suggest') {
+        reply.suggest = demoAnswerable(strList(d.questions, 6));
+        // the answer's last paragraph is their "tap one" heading (brain._offline_events): it
+        // goes with the chips, so hidden chips (another language, none left) leave no orphan
+        const cut = reply.content.lastIndexOf('\n\n');
+        if (cut >= 0 && strList(d.questions, 6).length) { reply.sugHead = reply.content.slice(cut + 2).slice(0, 500); reply.content = reply.content.slice(0, cut); }
+      }
       else if (ev.event === 'usage') { reply.usage = cleanUsage(d); renderChatSoon(); }
       else if (ev.event === 'budget') { reply.budget = { text: String(d.text || '').slice(0, 500), alert }; }
       else if (typeof d.t === 'string') { reply.status = null; reply.content += d.t; renderChatSoon(); }
@@ -2150,14 +2206,14 @@ async function chat(kind) {
   let asked = null;
   if (kind === 'send') {
     const q = c.draft.trim(); if (!q) return;
-    asked = { role: 'user', content: q };
+    asked = { role: 'user', content: q, lang: S.lang };
     c.messages.push(asked); c.draft = '';
     const box = $('#chatq'); if (box) { box.value = ''; box.style.height = ''; }
   }
   const mode = kind === 'insight' ? 'insight' : 'chat';
   // what the model sees: every finished turn (a stopped reply's partial text included)
   const history = c.messages.filter(m => !m.err && m.content).map(m => ({ role: m.role, content: m.content }));
-  const reply = { role: 'assistant', content: '', mode, pending: true };
+  const reply = { role: 'assistant', content: '', mode, pending: true, lang: S.lang };
   c.messages.push(reply);
   const ctrl = new AbortController(), alert = mode === 'chat' ? c.alert || null : null;
   const budgetOk = !!c.budgetOk;   // round 7 C: the user just said "send anyway" (one request only)
@@ -2321,7 +2377,7 @@ function quietCards() {
 async function quietSeen(id, seen) {
   try {
     await postJSON('/api/notify/seen', { id, seen });
-    delete lastTag['notify' + S.lang]; delete lastTag['overview' + S.lang];   // the next refresh takes the server's list as it is
+    delete lastTag.notify; delete lastTag.overview;   // the next refresh takes the server's list as it is
     if (seen && S.data.notify) S.data.notify.summaries = S.data.notify.summaries.filter(s => s.id !== id);
     render();
     if (seen) toast(T('app.quiet.closed'), { undo: () => quietSeen(id, false) }); else refresh();
@@ -4411,7 +4467,11 @@ const DATASETS = { inv: '/api/inventory', alerts: '/api/alerts', privacy: '/api/
                    pres: '/api/presence', notify: '/api/notify', hyg: '/api/hygiene' };
 const NAV_OF = { inbox: 'inbox', alerts: 'security', sug: 'suggestions', health: 'health' };   // what flashes when a dataset changes
 let refreshTimer = null;
-const lastTag = {};   // dataset (+ lang) -> the ETag / hash of what S.data holds
+// dataset -> the ETag / hash of what S.data holds. ONE copy of the data, so ONE tag per
+// dataset: a tag remembered per language would turn a language round-trip into a 304 that
+// keeps the other language's texts on screen (round 10c). A language change forgets them all.
+let lastTag = {};
+function forgetTags() { lastTag = {}; }
 // GET a JSON endpoint with the ETag we hold: -> {tag, text} or null when unchanged (304)
 async function getTagged(path, tag) {
   const r = await fetch(api(path), { cache: 'no-store', headers: tag ? { 'if-none-match': tag } : {} });
@@ -4428,11 +4488,11 @@ async function getTagged(path, tag) {
 // overwrites a fresher live refetch (or an action's own answer) that landed meanwhile.
 let dataSeq = 0;
 const dataAt = {};
-function localData(k, value) { S.data[k] = value; dataAt[k] = ++dataSeq; delete lastTag[k + S.lang]; delete lastTag['overview' + S.lang]; }
+function localData(k, value) { S.data[k] = value; dataAt[k] = ++dataSeq; delete lastTag[k]; delete lastTag.overview; }
 function takeData(k, tag, value, live, seq) {
   if (seq !== undefined && (dataAt[k] || 0) > seq) return false;   // fresher data is here already
-  if (tag && lastTag[k + S.lang] === tag) return false;
-  S.data[k] = value; lastTag[k + S.lang] = tag;
+  if (tag && lastTag[k] === tag) return false;
+  S.data[k] = value; lastTag[k] = tag;
   if (seq !== undefined) dataAt[k] = seq;
   if (live && NAV_OF[k]) flashOn('nav:' + NAV_OF[k]);
   return true;
@@ -4448,8 +4508,9 @@ async function refresh() {
   const wasBad = S.offline || S.loadErr;
   if (wasBad) render();         // the Retry buttons show "Loading…" meanwhile
   try {
-    const r = await getTagged('/api/overview', lastTag['overview' + lang]);
-    if (lang !== S.lang) { S.refreshing = false; clearTimeout(slow); return; }    // the language changed meanwhile
+    const r = await getTagged('/api/overview', lastTag.overview);
+    // the language changed meanwhile: this answer is in the old one - fetch again in the new
+    if (lang !== S.lang) { S.refreshing = false; clearTimeout(slow); refresh(); return; }
     if (r) {
       const j = JSON.parse(r.text);
       let stale = false;
@@ -4459,7 +4520,7 @@ async function refresh() {
       });
       // a part was older than what we hold (or missing): the bundle's ETag does not describe S.data
       partial = Array.isArray(j.failed) ? j.failed : [];
-      if (stale || partial.length) delete lastTag['overview' + lang]; else lastTag['overview' + lang] = r.tag;
+      if (stale || partial.length) delete lastTag.overview; else lastTag.overview = r.tag;
     }
   } catch (e) { if (isNetErr(e)) net++; else err = errText(e); }
   clearTimeout(slow);
@@ -4472,8 +4533,12 @@ async function refresh() {
   if (S.base === 'people' && !S.offline) loadPeople();   // so does this
   if (S.base === 'security' && !S.offline) loadHyg();    // Stage Q: the hygiene card
   // a device-context chip left over from another session / DB: drop it if the device is gone
-  if (S.chat.ctx && S.data.inv && !findDev(S.chat.ctx.mac)) { S.chat.ctx = null; saveChat(); changed = true; }
+  // (and a renamed one - another language's demo family - is re-named, pre-filled question too)
+  if (syncChatCtx()) changed = true;
   S.refreshing = false;
+  // the language changed during any of the awaits above (an open drawer's loadDevice too):
+  // setLang()'s own refresh() found this one running and did nothing - run again in the new one
+  if (lang !== S.lang) { render(); refresh(); return; }
   if (changed) render(); else tick();
   checkNotify();
   schedule();
@@ -4483,14 +4548,14 @@ async function refreshSome(keys) {
   keys = keys.filter(k => DATASETS[k]);
   if (!keys.length || !S.meta) return;
   const lang = S.lang, seq = ++dataSeq;
-  const res = await Promise.allSettled(keys.map(k => getTagged(DATASETS[k], lastTag[k + lang])));
+  const res = await Promise.allSettled(keys.map(k => getTagged(DATASETS[k], lastTag[k])));
   if (lang !== S.lang) return;
   let changed = false;
   res.forEach((r, i) => {
     if (r.status === 'fulfilled' && r.value && takeData(keys[i], r.value.tag, JSON.parse(r.value.text), true, seq)) changed = true;
   });
   if (!changed) return;
-  delete lastTag['overview' + lang];      // the bundle's own ETag no longer matches what we hold
+  delete lastTag.overview;      // the bundle's own ETag no longer matches what we hold
   S.updated = Date.now();
   if (S.route.name === 'device' && keys.includes('inv')) await loadDevice(true);
   render();
@@ -4876,11 +4941,16 @@ async function setLang(code, persist) {
     if (S.lang) { $('#langsel').value = S.lang; toast(T('app.offline'), { kind: 'err' }); }
     return false;
   }
+  const was = S.lang, oldPrefill = was && S.chat.ctx ? prefill(S.chat.ctx) : null;
   S.lang = j.lang; S.L = j.strings; fmtInit();
+  // Round 10c: ONE copy of the data on screen - the old language's tags must not turn
+  // the new language's answers into 304s (refresh() below then fetches everything visible)
+  if (was && was !== S.lang) { forgetTags(); chatLangChanged(was, oldPrefill); }
   if (persist) { try { localStorage.setItem(LANG_KEY, S.lang); } catch (e) { /* private mode */ } }
   applyStatic(); render();                  // chrome switches instantly; data follows
   S.look.key = null; if (drawerOpen() && S.route.name !== 'device') { S.look = { key: S.route.name + ':' + S.route.arg }; loadLookup(); }
   loadChoices(); refresh();
+  if (S.since.r) sinceLoad();   // "since your last visit": its texts are the server's too
   // pages whose server texts were fetched once per visit: fetch them in the new language
   if (['system', 'settings', 'welcome'].includes(S.base)) loadAI();
   S.push.log = {};   // the delivery logs' texts are localized too: an open one is fetched again
