@@ -18,6 +18,7 @@ rates by differencing consecutive samples.
 Unconfigured = off: without NTOPNG_URL nothing here runs and netwarden behaves
 exactly as before. Pure standard library. Config from .env:
     NTOPNG_URL=http://192.168.1.2:3000  NTOPNG_USER=...  NTOPNG_PASS=...  NTOPNG_IFID=0
+    (or NTOPNG_TOKEN=... instead of user + password; NTOPNG_VERIFY_TLS=0 for self-signed https)
 
 Run inside WSL:
     python3 -m netwarden.traffic_ingest              # take one sample
@@ -60,26 +61,47 @@ class NtopngSource:
     (only the per-host data.lua does), so callers map IP -> MAC from the device table."""
     source = "ntopng"
     PATH = "/lua/rest/v2/get/host/active.lua"
+    # documented return codes (api_v2.html) -> what the user should check
+    RC_HINTS = {-2: "check NTOPNG_IFID (the interface number)",
+                -3: "NOT_GRANTED: this ntopng user may not read that data - check NTOPNG_USER",
+                -6: "ntopng had an internal error - try again later"}
 
     def __init__(self, url: str, user: str = "", password: str = "", ifid: int = 0,
-                 page_size: int = 100, timeout: float = 10):
+                 page_size: int = 100, timeout: float = 10, token: str = "",
+                 verify_tls: bool = True):
         self.url = url.rstrip("/")
         self.ifid = ifid
         self.page_size = page_size
         self.timeout = timeout
-        self.password = password   # only for masking it in errors (health.source_secrets)
-        self.auth = ("Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
-                     if user else None)
-        self.opener = health.opener()   # never follows a redirect to another host
+        self.password = password or token   # only for masking it in errors (health.source_secrets)
+        # an API token (ntopng: user settings -> API token) wins over user + password;
+        # HTTPServer.cpp accepts "Authorization: Token <t>" (or Bearer) and Basic
+        if token:
+            self.auth = "Token " + token
+        elif user:
+            self.auth = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+        else:
+            self.auth = None
+        # same-origin redirects only; https verified unless NTOPNG_VERIFY_TLS=0
+        self.opener = health.opener(health.tls_context(verify_tls))
 
     def _get(self, params: dict) -> dict:
         req = urllib.request.Request(f"{self.url}{self.PATH}?{urllib.parse.urlencode(params)}")
+        req.add_header("Accept", "application/json")
         if self.auth:
             req.add_header("Authorization", self.auth)
         with self.opener.open(req, timeout=self.timeout) as resp:
+            # without (valid) credentials ntopng answers 302 -> its login page (same origin,
+            # so the opener follows it): say "login", not "not JSON"
+            if "/login.lua" in (resp.geturl() or ""):
+                raise health.SourceError("auth", "ntopng asked for a login - check NTOPNG_USER / "
+                                                 "NTOPNG_PASS or NTOPNG_TOKEN")
             body = health.read_source_json(resp, "ntopng", "NTOPNG_URL")
-        if body.get("rc", 0) != 0:
-            raise OSError(f"ntopng error {str(body.get('rc'))[:20]}: {str(body.get('rc_str'))[:100]}")
+        rc = body.get("rc", 0)
+        if rc != 0:
+            hint = self.RC_HINTS.get(rc) if isinstance(rc, int) and not isinstance(rc, bool) else None
+            msg = f"ntopng error {str(rc)[:20]}: {str(body.get('rc_str'))[:100]}"
+            raise OSError(f"{msg} - {hint}" if hint else msg)
         return body
 
     @staticmethod
@@ -166,8 +188,14 @@ def source_from_env(env: dict) -> NtopngSource | None:
     """The configured traffic source, or None (bandwidth is optional)."""
     if not env.get("NTOPNG_URL"):
         return None
+    try:
+        ifid = int(env.get("NTOPNG_IFID") or 0)
+    except ValueError:
+        ifid = 0
+    from netwarden.dns_ingest import _flag   # the one "0/false/no/off" parser
     return NtopngSource(env["NTOPNG_URL"], env.get("NTOPNG_USER", ""), env.get("NTOPNG_PASS", ""),
-                        int(env.get("NTOPNG_IFID") or 0))
+                        ifid, token=env.get("NTOPNG_TOKEN", ""),
+                        verify_tls=_flag(env.get("NTOPNG_VERIFY_TLS")))
 
 
 def ingest(db, src: TrafficSource) -> dict:

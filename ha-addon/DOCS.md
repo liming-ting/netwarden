@@ -24,6 +24,8 @@ Full guide (also in Traditional Chinese): https://github.com/liming-ting/netward
 | `adguard_url`, `adguard_user`, `adguard_password` | AdGuard Home's web address and login. netwarden reads the query log only. |
 | `pihole_url`, `pihole_password` | Pi-hole v6 address and its web or app password. |
 | `ntopng_url`, `ntopng_user`, `ntopng_password` | Optional: bytes per device from ntopng. |
+| `ntopng_token` | Optional: an ntopng API token instead of user name and password. |
+| `adguard_verify_tls`, `pihole_verify_tls`, `ntopng_verify_tls` | Leave unset (HTTPS certificates are verified). Turn off only for an `https://` address with the source's own self-signed certificate. |
 | `anthropic_api_key` | Optional: AI answers from Claude, only when you ask in the AI page. |
 | `ai_api_key` | Optional: key for a local / private OpenAI-compatible server (address and model are set in the dashboard's Settings). |
 | `offline_ai` | Never call an AI model; the AI page uses its built-in offline summary. |

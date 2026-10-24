@@ -94,5 +94,6 @@ container profile applies.
 - Ingress was tested with `tests/ingress_proxy.py`, which mimics the header behaviour
   described above (connecting from 127.0.0.2 as the trusted peer), and in Chrome through
   that proxy at /api/hassio_ingress/TESTTOKEN/.
-- armv7: Home Assistant has announced the end of 32-bit support; it stays in the list as
-  long as the release job builds it.
+- armv7: Home Assistant ended 32-bit support with 2025.12 (no new builds for i386 /
+  armhf / armv7); it stays in the list as long as the release job builds it, for existing
+  installs. Round 9 V re-check and new TLS / token options: [integrations.md](integrations.md).

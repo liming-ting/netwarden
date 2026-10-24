@@ -20,12 +20,24 @@ configuration:
     name: AdGuard Home user name
   adguard_password:
     name: AdGuard Home password
+  adguard_verify_tls:
+    name: Verify AdGuard Home's HTTPS certificate
+    description: >-
+      Leave unset (= verify). Turn off only for an https:// address with AdGuard Home's
+      own self-signed certificate on a network you trust.
   pihole_url:
     name: Pi-hole URL
     description: For example http://192.168.1.3 (Pi-hole v6). Used when DNS source is pihole.
   pihole_password:
     name: Pi-hole password
-    description: The web interface password or an app password.
+    description: >-
+      An app password is best (Pi-hole: Settings -> Web interface / API -> Configure app
+      password); required when two-factor login is on. The web password works too.
+  pihole_verify_tls:
+    name: Verify Pi-hole's HTTPS certificate
+    description: >-
+      Leave unset (= verify). Turn off only for an https:// address with Pi-hole's own
+      self-signed certificate on a network you trust.
   ntopng_url:
     name: ntopng URL (optional)
     description: For bytes per device. Without it netwarden shows DNS activity only.
@@ -33,6 +45,14 @@ configuration:
     name: ntopng user name
   ntopng_password:
     name: ntopng password
+  ntopng_token:
+    name: ntopng API token (optional)
+    description: Instead of user name and password (ntopng user settings -> API token).
+  ntopng_verify_tls:
+    name: Verify ntopng's HTTPS certificate
+    description: >-
+      Leave unset (= verify). Turn off only for an https:// address with a self-signed
+      certificate on a network you trust.
   anthropic_api_key:
     name: Anthropic API key (optional)
     description: >-

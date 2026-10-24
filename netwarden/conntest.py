@@ -17,14 +17,17 @@ one of ERROR_KINDS; the page shows err.conn_<kind>.
 from __future__ import annotations
 
 import socket
+import ssl
 import time
 import urllib.error
 
-from netwarden import brain, dns_ingest, localai, traffic_ingest
+from netwarden import brain, dns_ingest, health, localai, traffic_ingest
 
 SOURCES = ("adguard", "pihole", "ntopng", "ai")
 ERROR_KINDS = ("not_configured", "refused", "unreachable", "timeout", "auth", "http",
-               "bad_response", "cloud", "offline")
+               "bad_response", "cloud", "offline",
+               # round 9 V (docs/dev/integrations.md): the source said exactly what is wrong
+               "tls", "rate_limited", "seats", "totp", "token_v5", "version", "log_off")
 TIMEOUT = 5.0
 
 
@@ -46,11 +49,17 @@ def summary(env: dict, db=None) -> dict:
 
 def _kind(e: BaseException) -> str:
     """An exception from a source call -> one of ERROR_KINDS."""
+    if isinstance(e, health.SourceError) and e.kind in ERROR_KINDS:
+        return e.kind
     if isinstance(e, urllib.error.HTTPError):
+        if e.code == 429:
+            return "rate_limited"
         return "auth" if e.code in (401, 403) else "http"
-    if isinstance(e, dns_ingest.PiHoleError):
-        return "auth" if "401" in str(e) or "password" in str(e).lower() else "http"
     reason = getattr(e, "reason", e)
+    if isinstance(reason, ssl.SSLError) or isinstance(e, ssl.SSLError):
+        return "tls"   # self-signed certificate, or http:// spoken to an https port
+    if isinstance(e, OSError) and health.error_kind(str(e)) in ERROR_KINDS:
+        return health.error_kind(str(e))
     if isinstance(reason, (socket.timeout, TimeoutError)) or isinstance(e, (socket.timeout, TimeoutError)):
         return "timeout"
     if isinstance(reason, ConnectionRefusedError) or isinstance(e, ConnectionRefusedError):
@@ -70,14 +79,12 @@ AI_KINDS = {"timeout": "timeout", "auth": "auth", "local_unreachable": "unreacha
 def _probe(name: str, env: dict, db) -> None:
     """The one cheap question; raises on any failure."""
     if name == "adguard":
-        src = dns_ingest.AdGuardHome(env["ADGUARD_URL"], env.get("ADGUARD_USER", ""),
-                                     env.get("ADGUARD_PASS", ""), timeout=TIMEOUT)
+        src = dns_ingest.make_source("adguard", env, timeout=TIMEOUT)
         if not isinstance(src._get("/control/status", {}), dict):
             raise ValueError("not an AdGuard Home status")
+        src.check_log_enabled()   # reachable but logging nothing = still not working
     elif name == "pihole":
-        src = dns_ingest.PiHole(env["PIHOLE_URL"], env.get("PIHOLE_PASSWORD", ""),
-                                verify_tls=dns_ingest._flag(env.get("PIHOLE_VERIFY_TLS")),
-                                timeout=TIMEOUT)
+        src = dns_ingest.make_source("pihole", env, timeout=TIMEOUT)
         try:
             if not isinstance(src._get("/api/info/version", {}), dict):
                 raise ValueError("not a Pi-hole answer")

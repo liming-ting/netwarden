@@ -225,6 +225,9 @@ register(Setting("ui.language", "choice", i18n.DEFAULT, "NETWARDEN_LANG", "gener
                  choices=tuple(i18n.CODES), validator=_language))
 register(Setting("time.timezone", "str", "", "NETWARDEN_TZ", "general", max_len=64,
                  validator=_timezone))
+# Round 9 U (WCAG 2.1.4): the dashboard's single-key shortcuts (g + letter, /, ?, c, 1-7,
+# the inbox keys). The home's default; each browser may still choose for itself.
+register(Setting("ui.shortcuts", "bool", True, None, "general"))
 register(Setting("data.retention_days", "int", store.DEFAULT_RETENTION_DAYS,
                  "NETWARDEN_RETENTION_DAYS", "data", admin=True,
                  minimum=store.MIN_RETENTION_DAYS, maximum=3650))

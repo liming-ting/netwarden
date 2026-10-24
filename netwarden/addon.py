@@ -63,13 +63,18 @@ OPTION_ENV = {
     "ntopng_url": "NTOPNG_URL",
     "ntopng_user": "NTOPNG_USER",
     "ntopng_password": "NTOPNG_PASS",
+    "ntopng_token": "NTOPNG_TOKEN",
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "ai_api_key": "NETWARDEN_AI_KEY",
     "retention_days": "NETWARDEN_RETENTION_DAYS",
 }
 SECRET_OPTIONS = frozenset({"adguard_password", "pihole_password", "ntopng_password",
-                            "anthropic_api_key", "ai_api_key"})
+                            "ntopng_token", "anthropic_api_key", "ai_api_key"})
 BOOL_OPTIONS = {"offline_ai": "NETWARDEN_OFFLINE_AI", "lan_access": "NETWARDEN_LAN"}
+# round 9 V: optional (`bool?`, no default): left out = certificates are verified; false =
+# accept the source's own self-signed certificate (docs/dev/integrations.md)
+TLS_OPTIONS = {"adguard_verify_tls": "ADGUARD_VERIFY_TLS", "pihole_verify_tls": "PIHOLE_VERIFY_TLS",
+               "ntopng_verify_tls": "NTOPNG_VERIFY_TLS"}
 MAX_VALUE = 1000                   # longest string option accepted (URLs, keys)
 
 
@@ -122,7 +127,7 @@ def env_from_options(opts: dict, environ=None) -> dict:
         val = val.strip()
         if val and len(val) <= MAX_VALUE and "\n" not in val and "\0" not in val:
             out[var] = val
-    for key, var in BOOL_OPTIONS.items():
+    for key, var in (*BOOL_OPTIONS.items(), *TLS_OPTIONS.items()):
         if isinstance(opts.get(key), bool):
             out[var] = "1" if opts[key] else "0"
     if "NETWARDEN_TZ" not in out and _zone_name(environ.get("TZ")):
@@ -141,7 +146,8 @@ def _zone_name(name) -> bool:
 def described(opts: dict) -> list[str]:
     """For the log: which options are set - names only, secrets as "set", never a value."""
     return sorted(k for k, v in opts.items()
-                  if k in OPTION_ENV or k in BOOL_OPTIONS if v not in (None, "", False))
+                  if k in OPTION_ENV or k in BOOL_OPTIONS or k in TLS_OPTIONS
+                  if v not in (None, "", False) or (k in TLS_OPTIONS and v is False))
 
 
 def ingress_listen(proxy: str = INGRESS_PROXY) -> str:

@@ -16,7 +16,8 @@ LOCALES = ROOT / "netwarden" / "locales"
 
 # every page route the dashboard had before Stage U (bookmarks / deep links / docs)
 OLD_PAGES = ["overview", "inbox", "devices", "map", "people", "security", "health", "suggestions",
-             "privacy", "activity", "family", "ai", "system", "settings"]
+             "privacy", "activity", "family", "ai", "system", "settings",
+             "report"]   # round 9 X: Overview > Report (the shareable home report)
 
 
 def groups(js):

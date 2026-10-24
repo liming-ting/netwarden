@@ -101,7 +101,7 @@ function morphNode(a, b) {
 // nav link opens its first page. Keys 1-7 jump to the places; "g" + a letter to any page.
 // #/welcome (the first-run wizard) is not in the navigation; it sits under Settings.
 const GROUPS = [
-  ['overview', ['overview']],
+  ['overview', ['overview', 'report']],
   ['inbox', ['inbox', 'suggestions']],
   ['devices', ['devices', 'map']],
   ['family', ['people', 'family']],
@@ -116,7 +116,7 @@ const PAGES = GROUPS.flatMap(x => x[1]).concat(['welcome']);
 const NAV_ORDER = GROUPS.flatMap(x => x[1]);           // every page, in navigation order (the palette)
 const SEC_ICON = { overview: 'i-home', devices: 'i-devices', security: 'i-shield', health: 'i-wifi', suggestions: 'i-bulb',
                    privacy: 'i-eye-off', activity: 'i-pulse', family: 'i-family', ai: 'i-spark', system: 'i-sliders',
-                   inbox: 'i-inbox', settings: 'i-gear', welcome: 'i-check', people: 'i-user', map: 'i-map' };
+                   inbox: 'i-inbox', settings: 'i-gear', welcome: 'i-check', people: 'i-user', map: 'i-map', report: 'i-print' };
 const GROUP_ICON = { overview: 'i-home', inbox: 'i-inbox', devices: 'i-devices', family: 'i-family', network: 'i-shield', ai: 'i-spark', settings: 'i-gear' };
 const NAV_PRIMARY = ['overview', 'inbox', 'devices', 'family'];   // the phone's bottom bar; the rest: "More"
 const TYPE_KEYS = ['phone', 'tablet', 'computer', 'tv', 'streaming', 'console', 'camera', 'speaker', 'network',
@@ -131,6 +131,7 @@ const S = {
   route: { name: 'overview' }, base: 'overview',
   data: { inv: null, alerts: null, privacy: null, vis: null, status: null, homeAct: null, upnp: null,
           health: null, sug: null, score: null, inbox: null, pres: null, notify: null, hyg: null },
+  share: { period: '7', privacy: 'shareable', names: 'type', people: 'roles', format: 'html' },   // the Report page
   more: false, sugTab: 'open', sugOpen: new Set(), sugPlat: {}, probe: null, probeSaving: false,
   showExtIp: false,   // the router's public IP stays masked until the user asks
   types: [], people: [], rooms: [],
@@ -165,6 +166,8 @@ const S = {
   // shown), "Since your last visit", and what flashes after a live update
   map: { by: 'person', mode: null, q: '', person: '', type: '', status: '', view: { x: 0, y: 0, k: 1 }, seen: null },
   since: { t: null, r: null, off: false }, flash: {}, flashTimer: null,
+  // Round 9 U: <details data-persist> open / closed, a scroll position still to restore
+  openSec: {}, wantY: null,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -223,7 +226,8 @@ function parseTs(iso) { if (!iso) return 0; const t = Date.parse(String(iso).rep
 // netwarden's now (relative times, "since your last visit") and the page says so.
 const CLOCK_SLACK_MS = 60 * 1000, CLOCK_NOTICE_MS = 5 * 60 * 1000;
 function clockFrom(r) {
-  const d = Date.parse((r && r.headers && r.headers.get('date')) || '');
+  if (DEMO) return;   // the demo's "now" is when it was built (boot), whatever the host's Date says
+  const d =Date.parse((r && r.headers && r.headers.get('date')) || '');
   if (!isNaN(d)) S.skew = d - Date.now();   // 1-s resolution + latency: noise far below the slack
 }
 const skewMs = () => (Math.abs(S.skew) > CLOCK_SLACK_MS ? S.skew : 0);
@@ -239,6 +243,7 @@ function approxDur(ms) {
 function noticeBar() {
   const el = $('#notice'); if (!el || !S.meta || !F) return;
   const lines = [];
+  if (DEMO) { el.hidden = true; return; }   // a made-up home: its clock and zone are part of the story
   if (Math.abs(S.skew) > CLOCK_NOTICE_MS) lines.push(T('app.clock.skew', { d: approxDur(S.skew) }));
   if (typeof S.meta.tz_offset_min === 'number' && S.meta.tz_offset_min !== -new Date().getTimezoneOffset())
     lines.push(T('app.clock.tz', { tz: S.meta.tz }));
@@ -253,8 +258,19 @@ function noticeBar() {
 const BASE = (/^(\/[\w.~-]+)*$/.test(document.documentElement.dataset.base || '') && document.documentElement.dataset.base) || '';
 // an env-set setting: in the Home Assistant add-on the env IS the add-on options
 function envLocked(env) { return T(S.meta.addon ? 'app.ai.addon_locked' : 'app.ai.env_locked', { env }); }
-function url(path) { return path.charAt(0) === '/' ? BASE + path : path; }
-function api(path) { return url(path) + (path.includes('?') ? '&' : '?') + 'lang=' + enc(S.lang); }
+// Round 9 W: the static live demo (scripts/build_static_demo.py: plain files on GitHub Pages,
+// under any sub-path). ONLY its index.html sets data-static-demo and loads static/demo.js
+// (NWDemo); the real app has neither, so DEMO is false there and nothing changes. In the
+// demo every GET is a file saved at build time by the real server (NWDemo.file), every
+// other URL is relative to the page, nothing is ever written (postJSON refuses, see
+// demoRefused) and there is no live stream.
+const DEMO = document.documentElement.dataset.staticDemo === '1' && typeof window.NWDemo === 'object';
+function url(path) {
+  if (path.charAt(0) !== '/') return path;
+  if (DEMO) return /^\/(api|report)\//.test(path) ? window.NWDemo.file(path, S.lang) : path.slice(1);
+  return BASE + path;
+}
+function api(path) { return url(path + (path.includes('?') ? '&' : '?') + 'lang=' + enc(S.lang)); }
 // Stage M: a 401 means this browser's session is gone (revoked / expired) -> pair again.
 // Stage G: the page was open, so this browser HAD access: /pair says the sign-in ended.
 function needPair(r) { clockFrom(r); if (r.status === 401) { location.replace(url('/pair?expired=1')); return true; } return false; }
@@ -266,6 +282,7 @@ async function getJSON(path) {
   return j;
 }
 async function postJSON(path, body) {
+  if (DEMO) throw demoRefused();   // the static demo never sends a write (its host has nowhere to send it)
   const r = await fetch(url(path), { method: 'POST', headers: { 'content-type': 'application/json' },
                                 body: JSON.stringify(Object.assign({}, body, { lang: S.lang })) });
   needPair(r);
@@ -278,6 +295,8 @@ const isNetErr = e => e instanceof TypeError;   // fetch() rejects with TypeErro
 // Stage G: what the person reads about a failure - "can't reach netwarden", the server's
 // own (localized) answer, or one calm sentence. Never a JS exception text or a stack.
 function uiError(msg) { const e = new Error(msg); e.ui = true; return e; }
+// Round 9 W: what a write in the static demo answers - fail() turns it into a calm note
+function demoRefused(key) { const e = uiError(T(key || 'app.demo.readonly')); e.demo = true; return e; }
 function errText(e) {
   if (isNetErr(e)) return T('app.offline');
   return e && (e.status || e.ui) && e.message ? e.message : T('err.internal');
@@ -702,13 +721,10 @@ const SORTS = {
   privacy: d => (d.privacy ? GRADE_RANK[d.privacy.grade] : 0), traffic: bwTotal,
 };
 function filtered() {
-  const f = S.f, q = f.q.trim().toLowerCase();
+  const f = S.f, q = f.q.trim();
   const list = devices().filter(d => {
-    if (q) {
-      const hay = [dname(d), d.vendor, d.hostname, (d.ips || []).join(' '), d.mac, d.owner, d.room,
-                   d.type_info && d.type_info.type_name, (d.services || []).join(' ')].join(' ').toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
+    // round 9: case / accent / width / 繁简 insensitive, every word somewhere (fold())
+    if (q && !matches(q, devHay(d) + ' ' + ((d.type_info && d.type_info.type_name) || '') + ' ' + (d.services || []).join(' '))) return false;
     if (f.type && typeKey(d.type) !== f.type) return false;
     if (f.owner && (d.owner || '') !== f.owner) return false;
     if (f.room && (d.room || '') !== f.room) return false;
@@ -816,8 +832,11 @@ function viewDevices() {
   const inv = S.data.inv;
   if (!inv) return skeleton(1);
   const all = devices(), list = filtered(), cols = devCols(), f = S.f;
-  const owners = Array.from(new Set(all.map(d => d.owner).filter(Boolean))).sort();
-  const rooms = Array.from(new Set(all.map(d => d.room).filter(Boolean))).sort();
+  // a remembered / linked owner or room that no device has (any more) stays a visible choice,
+  // so the menu never says "All rooms" while the list is filtered by it
+  const keepCur = (vals, v) => (v && !vals.includes(v) ? vals.concat([v]) : vals);
+  const owners = keepCur(Array.from(new Set(all.map(d => d.owner).filter(Boolean))).sort(), f.owner);
+  const rooms = keepCur(Array.from(new Set(all.map(d => d.room).filter(Boolean))).sort(), f.room);
   const shows = [['all', T('app.f.all')], ['online', T('app.online')], ['risky', T('app.badge.risky')], ['new', T('app.badge.new')]];
   const active = f.q || f.type || f.owner || f.room || f.show !== 'all' || f.since;
   const head = html`<tr>${cols.map(([k, label, num]) => html`<th class="${num ? 'num' : ''}" aria-sort="${f.sort === k ? (f.dir > 0 ? 'ascending' : 'descending') : 'none'}">
@@ -1406,9 +1425,9 @@ function presCard(p) {
     <div class="hint">${T('app.pres.how', { grace: fmt.num(pr.grace_minutes || 20), check: fmt.num(pr.check_minutes || 5) })}</div>` });
 }
 function devPicker(p) {
-  const q = S.ppl.q.trim().toLowerCase();
+  const q = S.ppl.q.trim();
   const list = devices().filter(d => d.mac && !d.is_self && d.owner !== p.name)
-    .filter(d => !q || [dname(d), d.vendor, d.mac, (d.ips || []).join(' '), d.owner].join(' ').toLowerCase().includes(q))
+    .filter(d => !q || matches(q, devHay(d)))
     .sort((x, y) => (!!x.owner - !!y.owner) || dname(x).localeCompare(dname(y))).slice(0, q ? 12 : 6);
   return html`<label class="q pick-q"><span class="sr">${T('app.ppl.pick_search')}</span>${icon('i-search')}<input type="search" name="ppl-q" data-ppl-q value="${S.ppl.q}" placeholder="${T('app.ppl.pick_search')}" autocomplete="off" maxlength="100"></label>
     ${list.length ? html`<ul class="rows">${list.map(d => html`<li data-key="${d.mac}">${typeIcon(d.type)}<span class="grow">${dname(d)}
@@ -1780,7 +1799,7 @@ function scoreCard() {
     </div>
     ${(sc.raise || []).length ? html`<div class="hint">${T('app.score.how')}</div><ul class="rows">${sc.raise.map(r => html`<li data-key="r-${r.id}">
       <span class="grow"><a href="#/suggestions" data-act="sug-goto" data-id="${r.id}">${r.title}</a></span><span class="tag tag-ok">${T('app.sug.points', { n: r.gain })}</span></li>`)}</ul>` : ''}
-    <details class="score-why"><summary>${T('app.score.breakdown')}</summary>
+    <details class="score-why" data-persist="score-why"${persistOpen('score-why')}><summary>${T('app.score.breakdown')}</summary>
       <ul class="rows">${(sc.deductions || []).map((d, i) => html`<li data-key="d-${i}"><span class="grow">${d.text}</span><span class="num muted">−${d.gain}</span></li>`)}</ul>
       <div class="hint">${sc.note}</div></details>` });
 }
@@ -1827,6 +1846,10 @@ function aiSub(compact) {
 function chatHere() { return S.base === 'ai' ? 'page' : (S.chat.open ? 'panel' : null); }
 // Questions worth asking about THIS network right now (localized), most pressing first.
 function suggestions() {
+  if (DEMO) {   // the static demo: only questions it has an answer for
+    const idx = demoChatIndex(), asked = new Set(S.chat.messages.filter(m => m.role === 'user').map(m => m.content.trim()));
+    return idx ? idx.suggested.filter(q => !asked.has(q)).slice(0, 6) : [];
+  }
   const out = [], seen = new Set(), add = (k, o) => { const t = T(k, o); if (!seen.has(t)) { seen.add(t); out.push(t); } };
   const a = S.data.alerts || {}, ctx = S.chat.ctx;
   if (ctx) add('app.ai.q.device', { name: ctx.name });
@@ -2047,6 +2070,61 @@ function sseFrame(frame) {
   let obj = null; try { obj = JSON.parse(data.join('\n')); } catch (e) { obj = null; }
   return { event, data: obj };
 }
+// The answer's SSE stream (POST /api/chat/stream, or a saved one in the static demo) -> `reply`
+async function readAnswer(r, reply, alert) {
+  if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw uiError(j.error || T('app.err.http', { status: r.status })); }
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = '', finished = false;
+  while (!finished) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf('\n\n')) >= 0) {
+      const ev = sseFrame(buf.slice(0, cut)); buf = buf.slice(cut + 2);
+      if (ev.event === 'done') { finished = true; break; }
+      if (ev.event === 'error') throw uiError((ev.data && ev.data.error) || T('app.chat.cut'));
+      const d = ev.data;
+      if (!d) continue;
+      if (ev.event === 'status') { reply.status = cleanTool(Object.assign({ sent: '' }, d)); renderChatSoon(); }
+      else if (ev.event === 'tool') {
+        const x = cleanTool(d); reply.status = null;
+        if (x) { (reply.tools = reply.tools || []).length < 10 && reply.tools.push(x); renderChatSoon(); }
+      } else if (ev.event === 'note') {
+        if (typeof d.text === 'string' && !(reply.notes || []).includes(d.text)) { (reply.notes = reply.notes || []).push(d.text.slice(0, 500)); renderChatSoon(); }
+      } else if (ev.event === 'suggest') { reply.suggest = demoAnswerable(strList(d.questions, 6)); }
+      else if (ev.event === 'usage') { reply.usage = cleanUsage(d); renderChatSoon(); }
+      else if (ev.event === 'budget') { reply.budget = { text: String(d.text || '').slice(0, 500), alert }; }
+      else if (typeof d.t === 'string') { reply.status = null; reply.content += d.t; renderChatSoon(); }
+    }
+  }
+  if (!finished) throw uiError(T('app.chat.cut'));
+}
+// Round 9 W: the static demo's assistant = the offline answers saved at build time for the
+// suggested questions (and the follow-ups they suggest); index.json lists them per language.
+const DEMO_CHAT = { lang: '', idx: null, p: null };
+function demoChatLoad() {
+  const lang = S.lang;
+  if (DEMO_CHAT.p && DEMO_CHAT.lang === lang) return DEMO_CHAT.p;
+  DEMO_CHAT.lang = lang; DEMO_CHAT.idx = null;
+  DEMO_CHAT.p = fetch(window.NWDemo.chatIndex(lang)).then(r => (r.ok ? r.json() : null)).catch(() => null).then(j => {
+    const idx = { suggested: strList(j && j.suggested, 20) || [], answers: strList(j && j.answers, 40) || [], insight: !!(j && j.insight) };
+    if (DEMO_CHAT.lang === lang) { DEMO_CHAT.idx = idx; if (chatHere()) render(); }
+    return idx;
+  });
+  return DEMO_CHAT.p;
+}
+function demoChatIndex() { demoChatLoad(); return DEMO_CHAT.idx; }   // null until it has loaded (then it renders)
+function demoAnswerable(list) {
+  if (!DEMO || !list) return list;
+  const idx = DEMO_CHAT.idx;
+  return list.filter(q => idx && idx.answers.includes(q.trim()));
+}
+async function demoAnswer(mode, q, signal) {
+  const idx = await demoChatLoad();
+  const ok = mode === 'insight' ? idx.insight : idx.answers.includes(String(q || '').trim());
+  return ok ? fetch(window.NWDemo.chatFile(mode, q, S.lang), { signal }) : null;
+}
 async function chat(kind) {
   const c = S.chat;
   if (c.busy) return;
@@ -2067,35 +2145,12 @@ async function chat(kind) {
   c.alert = null; c.budgetOk = false;
   c.busy = true; c.ctrl = ctrl; c.follow = true; saveChat(); render(); scrollChat();
   try {
-    const r = await fetch(url('/api/chat/stream'), { method: 'POST', headers: { 'content-type': 'application/json' }, signal: ctrl.signal,
-      body: JSON.stringify({ mode, messages: mode === 'chat' ? history : [], mac: c.ctx ? c.ctx.mac : null, alert, lang: S.lang, budget_ok: budgetOk }) });
-    if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw uiError(j.error || T('app.err.http', { status: r.status })); }
-    const reader = r.body.getReader(), dec = new TextDecoder();
-    let buf = '', finished = false;
-    while (!finished) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let cut;
-      while ((cut = buf.indexOf('\n\n')) >= 0) {
-        const ev = sseFrame(buf.slice(0, cut)); buf = buf.slice(cut + 2);
-        if (ev.event === 'done') { finished = true; break; }
-        if (ev.event === 'error') throw uiError((ev.data && ev.data.error) || T('app.chat.cut'));
-        const d = ev.data;
-        if (!d) continue;
-        if (ev.event === 'status') { reply.status = cleanTool(Object.assign({ sent: '' }, d)); renderChatSoon(); }
-        else if (ev.event === 'tool') {
-          const x = cleanTool(d); reply.status = null;
-          if (x) { (reply.tools = reply.tools || []).length < 10 && reply.tools.push(x); renderChatSoon(); }
-        } else if (ev.event === 'note') {
-          if (typeof d.text === 'string' && !(reply.notes || []).includes(d.text)) { (reply.notes = reply.notes || []).push(d.text.slice(0, 500)); renderChatSoon(); }
-        } else if (ev.event === 'suggest') { reply.suggest = strList(d.questions, 6); }
-        else if (ev.event === 'usage') { reply.usage = cleanUsage(d); renderChatSoon(); }
-        else if (ev.event === 'budget') { reply.budget = { text: String(d.text || '').slice(0, 500), alert }; }
-        else if (typeof d.t === 'string') { reply.status = null; reply.content += d.t; renderChatSoon(); }
-      }
-    }
-    if (!finished) throw uiError(T('app.chat.cut'));
+    const lastQ = mode === 'chat' && history.length ? history[history.length - 1].content : '';
+    const r = DEMO ? await demoAnswer(mode, lastQ, ctrl.signal)
+      : await fetch(url('/api/chat/stream'), { method: 'POST', headers: { 'content-type': 'application/json' }, signal: ctrl.signal,
+        body: JSON.stringify({ mode, messages: mode === 'chat' ? history : [], mac: c.ctx ? c.ctx.mac : null, alert, lang: S.lang, budget_ok: budgetOk }) });
+    if (r === null) reply.notes = [T('app.demo.chat_only')];   // the static demo has no answer to this one
+    else await readAnswer(r, reply, alert);
   } catch (e) {
     if (e.name === 'AbortError') reply.stopped = true;
     else reply.err = errText(e);
@@ -2235,8 +2290,10 @@ function announce(it) {
 // "While you were asleep": the unseen summaries (Overview + Inbox); Close = seen, with Undo
 function quietCards() {
   const n = S.data.notify, list = (n && n.summaries) || [];
+  // two nights read the same ("23:00-07:00"): then each card names its night
+  const many = list.length > 1;
   return list.map(s => html`<section class="card quiet-sum" data-key="qs-${s.id}">
-    <div class="card-h"><h2>${icon('i-moon')}${s.title}</h2><div class="card-a">
+    <div class="card-h"><h2>${icon('i-moon')}${s.title}${many && s.win ? html` <span class="muted">· ${fmt.day(s.win)}</span>` : ''}</h2><div class="card-a">
       <button type="button" class="btn sm ghost" data-act="quiet-seen" data-id="${s.id}">${T('app.quiet.dismiss')}</button></div></div>
     <p class="muted" style="margin:0 0 var(--s2)">${s.text}</p>
     <ul class="plain quiet-items">${s.items.map((it, i) => html`<li data-key="${i}"><a href="${it.href}">${it.text}</a></li>`)}</ul>
@@ -2255,18 +2312,42 @@ async function quietSeen(id, seen) {
 // ---------------------------------------------------------------------------------------
 // Keyboard: one list feeds the "?" sheet and the System card. "g" then a letter jumps.
 const GO_KEYS = { o: 'overview', n: 'inbox', d: 'devices', s: 'security', h: 'health', t: 'suggestions', p: 'privacy',
-                  a: 'activity', f: 'family', i: 'ai', y: 'system', e: 'settings', w: 'people', m: 'map' };
+                  a: 'activity', f: 'family', i: 'ai', y: 'system', e: 'settings', w: 'people', m: 'map', r: 'report' };
+// Round 9 U (WCAG 2.1.4): single-key shortcuts (letters, digits, "/", "?") can be turned
+// off - the home's default is the setting ui.shortcuts (/api/meta "shortcuts"), each
+// browser may choose for itself (localStorage). Ctrl/Cmd+K, Ctrl/Cmd+Z, Esc, Enter and the
+// keys inside the focused map / palette always work.
+const SINGLE_KEY = 'netwarden.single_keys';
+function singleKeys() {
+  let v = null; try { v = localStorage.getItem(SINGLE_KEY); } catch (e) { /* private mode */ }
+  if (v === '1' || v === '0') return v === '1';
+  return !(S.meta && S.meta.shortcuts === false);
+}
+function setSingleKeys(on) {
+  try { localStorage.setItem(SINGLE_KEY, on ? '1' : '0'); } catch (e) { /* private mode */ }
+  toast(T(on ? 'app.key.single_on_toast' : 'app.key.single_off_toast'));
+  if (S.keys.open) keysBody();
+  render();
+}
+// "/" = the page's own filter box (Devices, Map, the People picker); else the palette
+function focusFilter() {
+  if (drawerOpen()) return false;
+  const f = document.querySelector('#view [data-filter="q"], #view [data-mapf="q"], #view [data-ppl-q]');
+  if (!f || f.offsetParent === null) return false;
+  f.focus(); f.select(); return true;
+}
 function shortcutRows() {
   const k = s => html`<kbd>${s}</kbd>`;
   return [
     [html`${k('?')}`, T('app.key.help')],
-    [html`${k('/')} ${k('Ctrl')}+${k('K')}`, T('app.key.palette')],
+    [html`${k(MOD)}+${k('K')}`, T('app.key.palette')],
+    [html`${k('/')}`, T('app.key.filter')],
     ...Object.entries(GO_KEYS).map(([l, s]) => [html`${k('g')} ${T('app.key.then')} ${k(l)}`, T('app.palette.go', { section: T('app.nav.' + s) })]),
     [html`${k('1')}–${k(String(GROUPS.length))}`, T('app.key.nav')],
     [html`${k('j')} ${k('k')} · ${k('a')} ${k('t')} ${k('m')} ${k('s')} ${k('d')} · ${k('x')} · ${k('u')}`, T('app.key.inbox')],
     [html`${k('c')}`, T('app.key.chat')],
     [html`${k('R')}`, T('app.refresh')],
-    [html`${k('Ctrl')}+${k('Z')}`, T('app.key.undo')],
+    [html`${k(MOD)}+${k('Z')}`, T('app.key.undo')],
     [html`${k('+')} ${k('−')} · ${k('←')}${k('↑')}${k('→')}${k('↓')} · ${k('0')}`, T('app.key.map')],
     [html`${k('Enter')}`, T('app.key.send')],
     [html`${k('Shift')}+${k('Enter')}`, T('app.key.newline')],
@@ -2276,13 +2357,25 @@ function shortcutRows() {
 function shortcutTable() {
   return html`<div class="kbds">${shortcutRows().map(([keys, what]) => html`<span class="kk">${keys}</span><span>${what}</span>`)}</div>`;
 }
+function singleKeysField(id) {
+  const on = singleKeys();
+  return html`<div class="field"><span id="${id}">${T('app.key.single')}</span>
+    <div class="toggle-row"><button type="button" class="switch" role="switch" aria-checked="${String(on)}" aria-labelledby="${id}" aria-describedby="${id}-h" data-act="single-keys"><i></i></button>
+      <span class="muted">${T(on ? 'app.notify.on' : 'app.notify.off')}</span></div>
+    <p class="hint" id="${id}-h" style="margin:0">${T('app.key.single_hint')}</p></div>`;
+}
+function keysBody() {
+  morph($('#keysbody'), html`<header class="sheet-h" data-key="h"><h2 id="keys-title">${icon('i-keyboard')}${T('app.sys.shortcuts')}</h2>
+    <button type="button" class="btn icon ghost" data-act="keys-close" aria-label="${T('app.close')}" title="${T('app.close')} (Esc)">${icon('i-x')}</button></header>
+    <div class="keys-pref" data-key="pref">${singleKeysField('keys-single')}</div>
+    ${singleKeys() ? '' : html`<p class="hint keys-off" data-key="off">${icon('i-alert')} ${T('app.key.single_note_off', { mod: MOD })}</p>`}
+    <div data-key="tbl">${shortcutTable()}</div>`);
+}
 function openKeys() {
   if (S.keys.open) return;
   closePalette(true);
   S.keys = { open: true, back: document.activeElement };
-  morph($('#keysbody'), html`<header class="sheet-h"><h2 id="keys-title">${icon('i-keyboard')}${T('app.sys.shortcuts')}</h2>
-    <button type="button" class="btn icon ghost" data-act="keys-close" aria-label="${T('app.close')}" title="${T('app.close')} (Esc)">${icon('i-x')}</button></header>
-    ${shortcutTable()}`);
+  keysBody();
   $('#keysheet').hidden = false;
   $('#keysheet [data-act="keys-close"]').focus();
 }
@@ -2291,6 +2384,52 @@ function closeKeys() {
   $('#keysheet').hidden = true;
   const back = S.keys.back; S.keys = { open: false };
   if (back && document.contains(back)) back.focus({ preventScroll: true });
+}
+
+// ---------------------------------------------------------------------------------------
+// Report (round 9 X): the shareable home-network report - one file, made on the server
+// (report.py) at the privacy level chosen here. Preview opens the real file in a new tab;
+// "full" (addresses, names, domains) is for an admin only - the server checks it too.
+const SHARE_OPTS = { period: ['7', '30'], privacy: ['shareable', 'minimal', 'full'], names: ['type', 'keep'],
+                     people: ['roles', 'keep'], format: ['html', 'md'] };
+function shareUrl(o, extra) {
+  const q = new URLSearchParams({ period: o.period, privacy: o.privacy, names: o.names, people: o.people, format: o.format });
+  return '/api/report?' + q.toString() + (extra || '');
+}
+function shareSeg(key, labels, o, dis) {
+  return html`<div class="seg" role="group" aria-labelledby="share-${key}">${SHARE_OPTS[key].map(v => html`<button type="button" data-act="share-opt" data-k="${key}" data-v="${v}" aria-pressed="${String(o[key] === v)}"${dis && dis(v) ? ' disabled' : ''}>${labels(v)}</button>`)}</div>`;
+}
+function viewReport() {
+  const o = S.share, admin = !S.meta.remote, scrub = o.privacy === 'shareable';
+  if (o.privacy === 'full' && !admin) o.privacy = 'shareable';
+  if (o.privacy === 'full' && DEMO) o.privacy = 'shareable';   // the static demo has no full level
+  const field = (key, label, body, hint) => html`<div class="field"><span id="share-${key}">${label}</span>${body}${hint ? html`<p class="hint" style="margin:0">${hint}</p>` : ''}</div>`;
+  return html`${phead(T('app.nav.report'), T('app.share.sub'), demoPill())}
+    <div class="grid">
+      ${card({ key: 'share-opts', cls: 'span2', icon: 'i-sliders', title: T('app.share.options'), body: html`<div class="stack share-form">
+        ${field('period', T('app.share.period'), shareSeg('period', v => T('app.share.days', { n: v }), o))}
+        ${field('privacy', T('app.share.privacy'), shareSeg('privacy', v => T('share.level.' + v), o, v => v === 'full' && !admin),
+                html`${T('share.level_desc.' + o.privacy)}${admin ? '' : html` ${T('app.share.full_admin')}`}`)}
+        ${scrub ? field('names', T('app.share.names'), shareSeg('names', v => T('app.share.names_' + v), o)) : ''}
+        ${scrub ? field('people', T('app.share.people'), shareSeg('people', v => T('app.share.people_' + v), o)) : ''}
+        ${field('format', T('app.share.format'), shareSeg('format', v => T('app.share.fmt_' + v), o))}
+        <div class="ai-acts">
+          <a class="btn" href="${api(shareUrl(o))}" download="${DEMO ? `netwarden-report-${o.period}d-${o.privacy}.${o.format}` : ''}">${icon('i-download')}${T('app.share.download')}</a>
+          <a class="btn ghost" href="${api(shareUrl(o, '&inline=1'))}" target="_blank" rel="noopener">${icon('i-expand')}${T('app.share.preview')}</a>
+          <button type="button" class="btn ghost" data-act="share-copy">${icon('i-copy')}${T('app.share.copy_md')}</button>
+        </div>
+        <p class="hint" style="margin:0">${T('app.share.hint')}</p></div>` })}
+      ${card({ key: 'share-what', icon: 'i-print', title: T('app.share.what'), body: html`<p style="margin:0">${T('app.share.what_text')}</p>` })}
+    </div>`;
+}
+async function shareCopy(b) {
+  try {
+    const r = await fetch(api(shareUrl(Object.assign({}, S.share, { format: 'md' }))), { cache: 'no-store' });
+    if (needPair(r)) return;
+    const t = await r.text();
+    if (!r.ok) { let j = {}; try { j = JSON.parse(t); } catch (e) { /* not JSON */ } throw new Error(j.error || T('app.err.http', { status: r.status })); }
+    await copyText(t, b);
+  } catch (e) { toast(errText(e), { kind: 'err' }); }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2328,12 +2467,13 @@ function viewSystem() {
       </dl>` })}
       ${card({ key: 'exports', icon: 'i-download', title: T('app.sys.exports'), body: html`<div class="chips">
         <a class="btn ghost" href="${api('/api/export/devices.csv')}" download>${T('ui.export_csv')}</a>
-        <a class="btn ghost" href="${api('/api/export/report.md')}" download>${T('ui.export_report')}</a></div>
+        <a class="btn ghost" href="${api('/api/export/report.md')}" download>${T('ui.export_report')}</a>
+        <a class="btn ghost" href="#/report">${icon('i-print')}${T('app.palette.report')}</a></div>
         <div class="hint">${T('app.sys.exports_hint')}</div>` })}
       ${card({ key: 'prefs', icon: 'i-sliders', title: T('app.sys.prefs'), body: html`<div class="stack">
         <div class="field"><span>${T('app.theme')}</span><div class="seg" role="group" aria-label="${T('app.theme')}">${THEMES.map(t => html`<button type="button" data-act="theme" data-v="${t}" aria-pressed="${String(S.theme === t)}">${icon(THEME_ICON[t])}${T('app.theme.' + t)}</button>`)}</div></div>
         <label class="field"><span>${T('ui.language')}</span><select name="lang" data-act="lang" aria-label="${T('ui.language')}">${(S.meta.languages || []).map(l => html`<option value="${l.code}"${l.code === S.lang ? ' selected' : ''}>${l.name}</option>`)}</select></label>
-        ${notifyField()}</div>` })}
+        ${notifyField()}${singleKeysField('prefs-single')}</div>` })}
       ${S.meta.remote ? phoneCard() : card({ key: 'tosettings', icon: 'i-gear', title: T('app.nav.settings'), body: html`
         <p class="muted" style="margin:0">${T('app.sys.settings_text')}</p>
         <div class="ai-acts"><a class="btn" href="#/settings">${icon('i-gear')}${T('app.sys.open_settings')}</a></div>` })}
@@ -3128,6 +3268,10 @@ async function wzPoll() {
     const j = await getJSON('/api/setup/scan/status?job=' + enc(sc.job));
     Object.assign(sc, { state: j.state, found: j.found, error: j.error });
     if (j.state === 'running') { render(); setTimeout(wzPoll, 1500); return; }
+    if (S.setup.scanToast) {   // started from the palette: say how it went
+      S.setup.scanToast = false;
+      if (j.state === 'done') toast(T('app.wz.scan_done', { n: fmt.num(j.found || 0) })); else toast(T('ui.check_failed', { error: j.error || '?' }), { kind: 'err' });
+    }
     loadSetup(); refresh();
   } catch (e) { sc.state = 'error'; fail(e); }
   render();
@@ -3412,11 +3556,11 @@ function mapModel() {
     const out = window.NWMap.layout({ groups: groups.map(g => ({ key: g.key })), devices: items });
     mapCache = { sig, out, ms: performance.now() - t };
   }
-  const q = S.map.q.trim().toLowerCase(), f = S.map;
+  const q = S.map.q.trim(), f = S.map;
   items.forEach(it => {
     const d = it.d;
     it.shown = (!f.person || it.person === f.person) && (!f.type || typeKey(d.type) === f.type) && (!f.status || it.status === f.status);
-    it.hit = !!q && [dname(d), d.vendor, d.hostname, (d.ips || []).join(' '), d.mac, d.owner, d.room].join(' ').toLowerCase().includes(q);
+    it.hit = !!q && matches(q, devHay(d));
   });
   return { items, groups, lay: mapCache.out, bw };
 }
@@ -3629,6 +3773,7 @@ function mapCard() {
 const VISIT_MIN = 10 * 60 * 1000;        // gone at least this long before anything is "since"
 const visitKey = () => 'netwarden.visit.' + dbId();
 function sinceInit() {
+  if (DEMO) return;   // "since your last visit" needs the live server (any time can be asked)
   let base = '';
   try {
     base = sessionStorage.getItem(visitKey());
@@ -3704,7 +3849,7 @@ function liveIndicator() {
   morph(el, st === 'off' ? '' : html`<i aria-hidden="true"></i><span class="lbl">${T('app.live.' + st)}</span>`);
 }
 function liveConnect() {
-  if (!liveSupported() || !S.meta) return;
+  if (DEMO || !liveSupported() || !S.meta) return;   // the static demo is a snapshot: no stream
   clearTimeout(LIVE.timer);
   if (LIVE.es) return;
   if (document.visibilityState !== 'visible') { liveState('paused'); return; }
@@ -3775,7 +3920,7 @@ function undoLast() {
 const VIEWS = { overview: viewOverview, devices: viewDevices, security: viewSecurity, health: viewHealth,
                 suggestions: viewSuggestions, privacy: viewPrivacy, activity: viewActivity, family: viewFamily,
                 ai: viewAI, system: viewSystem, inbox: viewInbox, settings: viewSettings, welcome: viewWelcome,
-                people: viewPeople, map: viewMap };
+                people: viewPeople, map: viewMap, report: viewReport };
 // Page badges (sub-tabs): inbox = everything to do, security = attention items,
 // suggestions = open suggestions, health = an outage now
 function navCount(s) {
@@ -3872,9 +4017,35 @@ function render() {
   b.hidden = !bmsg || !S.updated;
   if (!b.hidden) morph(b, html`${icon('i-alert')}<span>${bmsg}</span><button type="button" class="btn sm ghost" data-act="retry"${S.refreshing ? ' disabled' : ''}>${S.refreshing ? T('ui.loading') : T('app.retry')}</button>`);
   noticeBar();
+  demoBar();
   liveIndicator();
   mapAfterRender();
   tick();
+  viewSave();
+  tryScroll();
+}
+// Round 9 W: the static demo's banner over every page - made-up data, read-only, nothing is
+// sent anywhere; links to the install guide and the source. Hidden for this tab once closed.
+const DEMO_BAR_KEY = 'netwarden.demo.bar_hidden';
+function demoBar() {
+  if (!DEMO) return;
+  let el = $('#demobar');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'demobar'; el.className = 'banner info demobar'; el.setAttribute('role', 'note');
+    $('#banner').before(el);
+  }
+  let hidden = false; try { hidden = sessionStorage.getItem(DEMO_BAR_KEY) === '1'; } catch (e) { /* private mode */ }
+  el.hidden = hidden;
+  if (hidden) return;
+  const sd = S.meta.static_demo || {}, zh = /^zh/.test(S.lang);
+  const ext = (href, label) => (/^https:\/\//.test(href || '') ? html`<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>` : '');
+  morph(el, html`${icon('i-eye-off')}<span>${T('app.demo.banner')} <span class="demolinks">${ext(zh ? sd.install_url_zh : sd.install_url, T('app.demo.install'))}${ext(sd.source_url, T('app.demo.source'))}</span></span>
+    <button type="button" class="btn icon sm quiet" data-act="demo-hide" aria-label="${T('app.demo.hide')}" title="${T('app.demo.hide')}">${icon('i-x')}</button>`);
+}
+function demoHide() {
+  try { sessionStorage.setItem(DEMO_BAR_KEY, '1'); } catch (e) { /* private mode: hidden until a reload */ }
+  const el = $('#demobar'); if (el) el.hidden = true;
+  const m = $('#main'); if (m) m.focus({ preventScroll: true });
 }
 // Stage G: move focus into a layer that is sliding in. It cannot take focus while still
 // `visibility: hidden` (the first frames of its transition), so try again for ~1 s; the
@@ -4023,6 +4194,7 @@ async function refreshSome(keys) {
 const RETRY_MS = 10000;   // Stage G: unreachable / an error -> try again sooner (a restart takes seconds)
 function schedule() {
   clearTimeout(refreshTimer);
+  if (DEMO) return;   // saved files never change: no periodic refresh
   const every = S.offline || S.loadErr ? RETRY_MS : LIVE.state === 'live' ? LIVE_REFRESH_MS : REFRESH_MS;   // live: a slow safety net only
   refreshTimer = setTimeout(() => { if (document.visibilityState === 'visible') refresh(); else schedule(); }, every);
 }
@@ -4060,15 +4232,130 @@ async function loadLookup() {
 }
 
 // ---------------------------------------------------------------------------------------
+// Round 9 U - remember the view. Per page, its filters / sort / tab live in ONE place:
+//   - the hash query of that page's history entry (#/devices?owner=Mia&show=online,
+//     #/suggestions?tab=done, #/map?by=type): shareable, survives reload and Back, and is
+//     relative to the page, so it works under the Home Assistant ingress base path too;
+//   - localStorage "netwarden.view.v1.<db>" (versioned; anything unknown, outdated or
+//     corrupt is dropped value by value): the page opens the way it was left.
+// A page link without a query keeps the remembered view; a query sets it exactly.
+// Scroll: every history entry gets an id (history.state.nw); its scroll position is kept in
+// sessionStorage, so Back - and a reload - returns to where the page was.
+const VIEW_V = 1;
+const viewKey = () => 'netwarden.view.v' + VIEW_V + '.' + dbId();
+const vStr = n => v => (typeof v === 'string' && v.length <= n && !/[\u0000-\u001f]/.test(v) ? v : undefined);
+const vOne = list => v => (list.includes(v) ? v : undefined);
+const VIEW_PAGES = {
+  devices: { def: { q: '', type: '', owner: '', room: '', show: 'all', group: '', sort: 'queries', dir: -1 },
+             get: () => S.f, set: o => Object.assign(S.f, o),
+             schema: { q: vStr(100), type: vOne([''].concat(TYPE_KEYS)), owner: vStr(64), room: vStr(64), show: vOne(['all', 'online', 'risky', 'new']),
+                       group: vOne(['', 'owner', 'room', 'type']), sort: v => (typeof v === 'string' && Object.prototype.hasOwnProperty.call(SORTS, v) ? v : undefined),
+                       dir: v => ({ '1': 1, '-1': -1 })[String(v)] } },
+  map: { def: { by: 'person', mode: '', q: '', person: '', type: '', status: '' },
+         get: () => Object.assign({}, S.map, { mode: S.map.mode || '' }), set: o => Object.assign(S.map, o, { mode: o.mode || null }),
+         schema: { by: vOne(['person', 'type']), mode: vOne(['', 'map', 'list']), q: vStr(100), person: vStr(80), type: vOne([''].concat(TYPE_KEYS)),
+                   status: v => ([''].concat(MAP_STATUS).includes(v) ? v : undefined) } },
+  suggestions: { def: { tab: 'open' }, get: () => ({ tab: S.sugTab }), set: o => { S.sugTab = o.tab; }, schema: { tab: vOne(SUG_TABS) } },
+  report: { def: { period: '7', privacy: 'shareable', names: 'type', people: 'roles', format: 'html' },
+            get: () => S.share, set: o => Object.assign(S.share, o),
+            schema: Object.fromEntries(Object.entries(SHARE_OPTS).map(([k, vs]) => [k, vOne(vs)])) },
+};
+// {key: valid value} from any object / URLSearchParams; missing or invalid keys -> default
+function viewClean(page, src, get) {
+  const P = VIEW_PAGES[page], out = {};
+  Object.keys(P.def).forEach(k => { const v = src == null ? undefined : P.schema[k](get ? get(k) : src[k]); out[k] = v === undefined ? P.def[k] : v; });
+  return out;
+}
+function viewQuery(page) {
+  const P = VIEW_PAGES[page], cur = P.get(), p = new URLSearchParams();
+  Object.keys(P.def).forEach(k => { if (cur[k] !== P.def[k] && cur[k] != null && cur[k] !== '') p.set(k, cur[k]); });
+  return p.toString();
+}
+function viewLoad() {
+  let o = null;
+  try { o = JSON.parse(localStorage.getItem(viewKey()) || 'null'); } catch (e) { o = null; }
+  if (!o || typeof o !== 'object' || o.v !== VIEW_V) return;
+  const pages = o.pages && typeof o.pages === 'object' ? o.pages : {};
+  Object.keys(VIEW_PAGES).forEach(pg => { if (pages[pg] && typeof pages[pg] === 'object') VIEW_PAGES[pg].set(viewClean(pg, pages[pg])); });
+  if (o.open && typeof o.open === 'object') Object.keys(o.open).slice(0, 40).forEach(k => { if (/^[\w.-]{1,40}$/.test(k) && typeof o.open[k] === 'boolean') S.openSec[k] = o.open[k]; });
+  if (Array.isArray(o.sug)) o.sug.slice(0, 30).forEach(id => { if (typeof id === 'string' && id.length <= 120) S.sugOpen.add(id); });
+}
+let viewSaved = '', viewHashT = null;
+function viewSave() {
+  const pages = {};
+  Object.keys(VIEW_PAGES).forEach(pg => { const q = viewQuery(pg); if (q) pages[pg] = Object.fromEntries(new URLSearchParams(q)); });
+  const s = JSON.stringify({ v: VIEW_V, pages, open: S.openSec, sug: Array.from(S.sugOpen).slice(-30) });
+  if (s !== viewSaved && dbId()) { viewSaved = s; try { localStorage.setItem(viewKey(), s); } catch (e) { /* private mode / full */ } }
+  // the page's own entry carries its view (replaceState: no new history entry; debounced -
+  // some browsers limit how often it may be called)
+  if (S.route.name !== S.base || !VIEW_PAGES[S.base]) return;
+  const q = viewQuery(S.base), want = '#/' + S.base + (q ? '?' + q : '');
+  if (location.hash === want) return;
+  clearTimeout(viewHashT);
+  viewHashT = setTimeout(() => {
+    if (S.route.name !== S.base || location.hash.split('?')[0] !== '#/' + S.base) return;
+    const q2 = viewQuery(S.base), w2 = '#/' + S.base + (q2 ? '?' + q2 : '');
+    if (location.hash !== w2) try { history.replaceState(history.state, '', w2); } catch (e) { /* rate-limited: next change */ }
+  }, 250);
+}
+// scroll per history entry
+const SCROLL_KEY = 'netwarden.scroll', SCROLL_MAX = 60;
+let scrollMap = {};
+try { const m = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || '{}'); if (m && typeof m === 'object' && !Array.isArray(m)) scrollMap = m; } catch (e) { scrollMap = {}; }
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+function entryId() { const s = history.state; return s && typeof s.nw === 'string' ? s.nw : null; }
+let curEntry = null;   // the entry on screen (hashchange: history.state is already the next one)
+// a new entry gets an id (null = it is new); a known one (Back / Forward / reload) returns it.
+// The entry being left keeps its scroll position (the new page has not scrolled yet).
+function entryVisit() {
+  if (curEntry && !S.wantY) scrollKeep(curEntry);
+  let id = entryId(); const known = !!id;
+  if (!known) {
+    id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    try { history.replaceState(Object.assign({}, history.state, { nw: id }), ''); } catch (e) { id = null; }
+  }
+  curEntry = id;
+  return known ? id : null;
+}
+let scrollSaveT = null;
+function scrollSaved() { const id = entryId(); if (id && id === curEntry && !S.wantY) scrollKeep(id); }
+function scrollKeep(id) {
+  delete scrollMap[id]; scrollMap[id] = Math.round(window.scrollY);
+  const keys = Object.keys(scrollMap); if (keys.length > SCROLL_MAX) keys.slice(0, keys.length - SCROLL_MAX).forEach(k => delete scrollMap[k]);
+  clearTimeout(scrollSaveT);
+  scrollSaveT = setTimeout(() => { try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(scrollMap)); } catch (e) { /* private mode */ } }, 300);
+}
+// the page may still be loading (People, Family): try again after each render for 3 s
+function restoreScroll(y) { S.wantY = { y, until: Date.now() + 3000 }; tryScroll(); }
+function tryScroll() {
+  const w = S.wantY; if (!w) return;
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  window.scrollTo(0, Math.min(w.y, Math.max(0, max)));
+  if (max >= w.y || Date.now() > w.until) S.wantY = null;
+}
+window.addEventListener('scroll', scrollSaved, { passive: true });
+['wheel', 'touchstart', 'keydown', 'mousedown'].forEach(t => window.addEventListener(t, () => { S.wantY = null; }, { passive: true, capture: true }));
+window.addEventListener('pagehide', () => {
+  if (curEntry && !S.wantY) scrollMap[curEntry] = Math.round(window.scrollY);
+  try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(scrollMap)); } catch (e) { /* private mode */ }
+});
+// <details data-persist="id">: open / closed is remembered (toggle does not bubble: capture)
+document.addEventListener('toggle', e => { const id = e.target.dataset && e.target.dataset.persist; if (id) { S.openSec[id] = e.target.open; viewSave(); } }, true);
+const persistOpen = id => (S.openSec[id] ? ' open' : '');
+
+// ---------------------------------------------------------------------------------------
 // Routing
 function parseHash() {
-  const h = location.hash.replace(/^#\/?/, '');
+  const full = location.hash.replace(/^#\/?/, ''), qi = full.indexOf('?');
+  const h = qi < 0 ? full : full.slice(0, qi);
   const i = h.indexOf('/'), name = i < 0 ? h : h.slice(0, i);
   let arg = i < 0 ? '' : h.slice(i + 1);
   try { arg = decodeURIComponent(arg); } catch (e) { arg = ''; }
   if (['device', 'service', 'domain'].includes(name) && arg) return { name, arg };
   if (name === 'people' && /^\d{1,9}$/.test(arg)) return { name, arg };   // one person
-  return { name: PAGES.includes(name) ? name : 'overview' };
+  const r = { name: PAGES.includes(name) ? name : 'overview' };
+  if (qi >= 0 && VIEW_PAGES[r.name]) r.query = new URLSearchParams(full.slice(qi + 1, qi + 1 + 600));
+  return r;
 }
 function onRoute() {
   const r = parseHash(), was = S.base;
@@ -4081,6 +4368,8 @@ function onRoute() {
   }
   if (r.name !== 'people' && !isDrawerRoute(r)) { S.ppl.form = null; S.ppl.id = ''; S.ppl.assignAfter = null; S.ppl.wantForm = false; }
   if (PAGES.includes(r.name)) S.base = r.name;
+  // a deep link's query sets that page's view exactly (each value checked, the rest default)
+  if (r.query) VIEW_PAGES[r.name].set(viewClean(r.name, r.query, k => (r.query.has(k) ? r.query.get(k) : undefined)));
   if (r.name === 'people' && S.ppl.r) setTimeout(openPersonFormSoon);   // "Add a person…" from a device (People already loaded)
   if (S.base === 'ai' && S.chat.open) { S.chat.open = false; saveChat(); }   // the page IS the chat
   const fresh = ['system', 'settings', 'welcome'];
@@ -4101,14 +4390,17 @@ function onRoute() {
     if (S.look.key !== key) { S.look = { key, r: null, err: null }; loadLookup(); }
   } else S.look = {};
   render();
-  if (was !== S.base) {
-    window.scrollTo(0, 0);
-    if (S.base === 'inbox' && inboxCount() && !drawerOpen()) inboxFocus();   // triage starts on the first item
-    else if (!drawerOpen()) $('#main').focus({ preventScroll: true });
+  const back = S.backY; S.backY = null;   // Back / Forward / reload: where that entry was scrolled to
+  if (was !== S.base || back != null) {
+    if (back != null && !drawerOpen()) restoreScroll(back); else if (was !== S.base) window.scrollTo(0, 0);
+    if (S.base === 'inbox' && inboxCount() && !drawerOpen() && back == null) inboxFocus();   // triage starts on the first item
+    else if (!drawerOpen() && was !== S.base) $('#main').focus({ preventScroll: true });
   }
   if (S.base === 'ai' && S.focusChat) { S.focusChat = false; const q = $('#chatq'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }
 }
-function go(hash) { if (location.hash === hash) onRoute(); else location.hash = hash; }
+// (the page's own link while it shows a remembered view - "#/devices" on "#/devices?show=new" -
+// is the same page: no second history entry)
+function go(hash) { if (location.hash === hash || (!hash.includes('?') && location.hash.split('?')[0] === hash)) onRoute(); else location.hash = hash; }
 function closeDrawer() {
   if (!drawerOpen()) return;
   if (S.cameFromBase) history.back(); else go('#/' + S.base);
@@ -4151,7 +4443,18 @@ function toast(msg, opts) {
   resume();
   return close;
 }
-function fail(e) { toast(T('app.toast.error', { error: errText(e) }), { kind: 'err' }); }
+function fail(e) {
+  if (e && e.demo) { demoNote(e.message); return; }   // the static demo said no: a note, not an error
+  toast(T('app.toast.error', { error: errText(e) }), { kind: 'err' });
+}
+// Round 9 W: "this is a read-only demo" - once, however many times a click asks again
+let demoNoteAt = { msg: '', t: 0 };
+function demoNote(msg) {
+  msg = msg || T('app.demo.readonly');
+  if (demoNoteAt.msg === msg && Date.now() - demoNoteAt.t < 4000) return;
+  demoNoteAt = { msg, t: Date.now() };
+  toast(msg);
+}
 
 async function ack(mac, key, label, undoing) {
   const hk = hiddenKey(mac, key), dev = findDev(mac);
@@ -4236,7 +4539,11 @@ async function copyText(text, btn) {
   } catch (e) { fail(e); }
   if (btn) btn.focus();
 }
-function download(path) { const a = document.createElement('a'); a.href = api(path); a.download = ''; document.body.appendChild(a); a.click(); a.remove(); }
+function download(path) {
+  if (DEMO && !DEMO_FILES.test(path)) { demoNote(T('app.demo.needs_install')); return; }   // e.g. the backup
+  const a = document.createElement('a'); a.href = api(path); a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+}
+const DEMO_FILES = /^\/(api\/export\/|api\/report\?|report\/weekly)/;   // the downloads the static demo has saved
 
 // ---------------------------------------------------------------------------------------
 // Theme + language
@@ -4279,13 +4586,18 @@ async function setLang(code, persist) {
 // language) since the locale itself could not be loaded; the page retries every 5 s and
 // reloads as soon as netwarden answers. Nothing raw, nothing technical.
 let bootTimer = null;
+// the browser's own language among `codes` (exact, then by its first part), or null
+function navLang(codes) {
+  const nav = (navigator.languages || [navigator.language || '']).map(x => String(x).toLowerCase()
+    .replace(/^zh-(tw|hk|mo)(-.*)?$/, 'zh-hant').replace(/^zh-(cn|sg)(-.*)?$/, 'zh-hans'));   // regions -> scripts
+  return codes.find(c => nav.includes(c.toLowerCase()))
+    || codes.find(c => nav.some(n => n.split('-')[0] === c.toLowerCase().split('-')[0])) || null;
+}
 function bootFailed() {
   let texts = {};
   try { texts = JSON.parse($('#off-texts').textContent) || {}; } catch (e) { texts = {}; }
   let saved = null; try { saved = localStorage.getItem(LANG_KEY); } catch (e) { /* private mode */ }
-  const nav = (navigator.languages || [navigator.language || '']).map(x => String(x).toLowerCase());
-  const code = (texts[saved] && saved) || Object.keys(texts).find(c => nav.includes(c.toLowerCase()))
-    || Object.keys(texts).find(c => nav.some(n => n.split('-')[0] === c.toLowerCase().split('-')[0])) || 'zh-Hant';
+  const code = (texts[saved] && saved) || navLang(Object.keys(texts)) || 'zh-Hant';
   const t = texts[code] || texts.en;
   if (!t) return;
   document.documentElement.lang = code;
@@ -4310,24 +4622,69 @@ async function bootRetry(manual) {
 }
 
 // ---------------------------------------------------------------------------------------
-// Command palette ("/" or Ctrl+K)
-// Fuzzy match: every character of the query in order (a subsequence), scored higher for
-// runs of consecutive characters, word starts and a plain substring. 0 = no match.
+// Command palette (Ctrl+K / Cmd+K, the header's search button; "/" when the page has no filter)
+// Round 9 U: one matcher for the palette and every page filter. fold() makes text case-,
+// accent- and width-insensitive (NFKD: full-width "ＴＶ" = "tv", "é" = "e") and maps the
+// Traditional Chinese characters of the UI's vocabulary to Simplified, so a word typed in
+// either script finds the other. Hangul / kana are recomposed (NFC) after the accents are dropped.
+const TS_PAIRS = '並并佔占併并來来個个們们備备僅仅價价儀仪儲储內内兩两別别刪删動动務务匯汇參参員员問问嗎吗' +
+  '圖图執执報报塊块夠够夾夹媽妈學学寢寝實实寫写將将對对屬属帳账幾几庫库廠厂廣广廳厅彙汇後后從从惡恶態态' +
+  '慮虑憑凭應应戲戏戶户掃扫換换擇择據据擬拟擷撷攔拦攝摄敗败數数斷断於于時时暫暂會会東东條条標标樣样檔档' +
+  '檢检權权歷历歸归決决沒没況况減减準准濾滤瀏浏為为無无牆墙狀状獨独現现產产異异當当發发監监盤盘確确碼码' +
+  '種种稱称筆笔範范篩筛約约組组絕绝給给統统經经綴缀編编緩缓縮缩總总繞绕續续聯联聽听脅胁腦脑著着蓋盖處处' +
+  '號号螢萤裝装裡里製制複复見见規规覽览觸触記记設设許许註注評评詢询試试話话該该詳详認认語语誤误誰谁調调' +
+  '請请證证識识議议讀读讓让費费資资蹤踪躍跃軟软輪轮輯辑輸输轉转辦办這这週周遊游過过達达遙遥遞递遠远適适' +
+  '遲迟遺遗針针銷销錯错鍵键鐘钟鑰钥長长門门閉闭間间關关隨随險险隱隐離离雲云電电靈灵靜静韌韧頁页項项須须' +
+  '頭头題题類类顯显風风體体麼么點点網网絡络線线機机視视錄录驗验測测鄰邻區区兒儿隊队層层選选單单頻频寬宽' +
+  '帶带傳传載载際际連连雙双圍围簡简齊齐臥卧廚厨書书樂乐響响聲声鬧闹訊讯啟启開开嚴严劃划歡欢舊旧親亲爺爷' +
+  '陽阳業业專专夢梦寶宝紅红綠绿藍蓝黃黄愛爱習习課课藝艺術术環环購购買买賣卖鎖锁訪访維维護护錢钱銀银鈕钮' +
+  '鏈链擴扩導导蘋苹華华樹树禮礼齡龄觀观計计討讨論论優优勢势構构衛卫憶忆詐诈騙骗釣钓魚鱼殺杀擊击協协閘闸' +
+  '橋桥熱热鬆松歲岁驅驱雜杂飾饰濟济';
+const TS = new Map();
+for (let i = 0; i + 1 < TS_PAIRS.length; i += 2) TS.set(TS_PAIRS[i], TS_PAIRS[i + 1]);
+const TS_RE = new RegExp('[' + Array.from(TS.keys()).join('') + ']', 'g');
+const foldCache = new Map();
+function fold(s) {
+  s = s == null ? '' : String(s);
+  let v = foldCache.get(s);
+  if (v === undefined) {
+    v = s.normalize('NFKD').replace(/[̀-ͯ]/g, '').normalize('NFC').toLowerCase()
+      .replace(/ß/g, 'ss').replace(TS_RE, c => TS.get(c));
+    if (foldCache.size > 4000) foldCache.clear();
+    foldCache.set(s, v);
+  }
+  return v;
+}
+// a word starts here: after a separator, or any CJK / kana / Hangul character (no spaces there)
+const CJK_RE = /[぀-ヿ㐀-鿿가-힯豈-﫿]/;
+const wordStart = (t, j) => j === 0 || /[\s·\-_.:/()'’,|«»“”"]/.test(t[j - 1]) || CJK_RE.test(t[j]);
+// Fuzzy match on folded text, best first: the query as a substring (earlier and at a word
+// start = better); every word of it somewhere; or initials / word prefixes in order ("lrt" =
+// Living Room Tv, "sams tv"). Letters scattered inside words do not count. 0 = no match.
 function fuzzy(q, text) {
-  text = String(text || '').toLowerCase();
+  q = fold(q).trim().replace(/\s+/g, ' '); text = fold(text);
   if (!q) return 1;
-  let at = 0, run = 0, score = 0;
+  const i = text.indexOf(q);
+  if (i >= 0) return 30 + (i === 0 ? 10 : 0) + (wordStart(text, i) ? 6 : 0) - Math.min(i, 40) * 0.05;
+  const words = q.split(' ');
+  if (words.length > 1 && words.every(w => text.includes(w))) return 20 + (words.every(w => wordStart(text, text.indexOf(w))) ? 4 : 0);
+  let at = 0, run = 0, score = 0, first = -1;
   for (const ch of q) {
     if (ch === ' ') { run = 0; continue; }
-    const j = text.indexOf(ch, at);
-    if (j < 0) return 0;
-    run = j === at ? run + 1 : 1;
-    score += run * 2 + (j === 0 || /[\s·\-_.:/()]/.test(text[j - 1]) ? 3 : 0) - Math.min(j - at, 6) * 0.2;
+    let j = text.indexOf(ch, at);
+    while (j >= 0 && !(run && j === at) && !wordStart(text, j)) j = text.indexOf(ch, j + 1);
+    if (first < 0) first = j;
+    if (j < 0 || j - first > 32) return 0;   // initials of ONE phrase, not of far-apart fields
+    run = run && j === at ? run + 1 : 1;
+    score += run * 2 + 1;
     at = j + ch.length;
   }
-  const i = text.indexOf(q);
-  if (i >= 0) score += 12 + (i === 0 ? 10 : 0);
-  return Math.max(score, 0.1);
+  return Math.min(score, 19);
+}
+// the page filters: a plain (folded) substring, every word of the query somewhere
+function matches(q, hay) {
+  const words = fold(q).split(/\s+/).filter(Boolean), h = fold(hay);
+  return words.every(w => h.includes(w));
 }
 const RECENT_MAX = 6;
 const recentKey = () => 'netwarden.recent.' + dbId();
@@ -4336,76 +4693,165 @@ function saveRecent(id) {
   const a = [id].concat(loadRecent().filter(x => x !== id)).slice(0, RECENT_MAX);
   try { localStorage.setItem(recentKey(), JSON.stringify(a)); } catch (e) { /* private mode */ }
 }
-// Everything the palette can do: [id, group, label, hint, icon, run, extra words to match]
+// A palette entry: {id, group, label, hint (plain text), keys (a shortcut, shown as <kbd>),
+// ic, run, kw (extra words it is found by)}. `single` keys are hidden while single-key
+// shortcuts are off; Ctrl/Cmd ones always show.
+function palEntry(id, group, label, o) { return Object.assign({ id, group, label, hint: '', keys: null, ic: 'i-search', kw: '' }, o); }
+// The non-critical alert kinds "Pause everyday alerts for 1 hour" snoozes for the whole
+// home (tuning.CRITICAL_KINDS - threats, open ports, risky forwards - always stay on).
+const PAUSE_KINDS = ['visibility', 'night', 'bedtime', 'spike', 'change', 'new', 'outage'];
+// Everything the palette can do. Actions follow their buttons' rules: what a paired phone
+// may not do (admin: port checks, scans, pairing, backup, settings) is not offered there.
 function paletteActions(q) {
   const acts = [], local = !S.meta.remote;
-  const a = (id, group, label, hint, ic, run, kw) => acts.push({ id, group, label, hint: hint || '', ic, run, kw: kw || '' });
+  const a = (id, label, ic, run, o) => acts.push(palEntry(id, 'act', label, Object.assign({ ic, run }, o)));
   // every page, named "Place › Page" when it shares its place (so "Security" is found under Network too)
   NAV_ORDER.forEach(s => {
     const g = GROUP_OF[s], shared = groupPages(g).length > 1;
     const name = shared ? groupLabel(g) + ' › ' + T('app.nav.' + s) : T('app.nav.' + s);
-    a('nav:' + s, 'nav', T('app.palette.go', { section: name }), NAV_GO[s] ? 'g ' + NAV_GO[s] : '', SEC_ICON[s], () => go('#/' + s), s + ' ' + g);
+    acts.push(palEntry('nav:' + s, 'nav', T('app.palette.go', { section: name }), { ic: SEC_ICON[s], run: () => go('#/' + s),
+      keys: NAV_GO[s] ? ['g', NAV_GO[s]] : null, kw: s + ' ' + g }));
   });
-  a('act:refresh', 'act', T('app.refresh'), 'R', 'i-refresh', refresh);
-  a('act:csv', 'act', T('ui.export_csv'), '', 'i-download', () => download('/api/export/devices.csv'), 'csv excel');
-  a('act:report', 'act', T('ui.export_report'), '', 'i-download', () => download('/api/export/report.md'), 'markdown md');
-  a('act:print', 'act', T('app.fam.print'), '', 'i-print', () => window.open(api('/report/weekly'), '_blank', 'noopener'), 'pdf');
-  a('act:bed', 'act', T('app.bed.add'), '', 'i-bed', () => { if (S.base === 'family' && S.fam.bed) { if (!S.fam.form) openBedForm(null); } else { S.fam.wantForm = true; go('#/family'); } });
-  if (local) a('act:check', 'act', T('app.sec.check_all'), '', 'i-port', confirmCheck, 'port scan');
-  a('act:chat', 'act', T('app.d.ask_any'), 'C', 'i-spark', () => openChat(), 'ai chat');
-  a('act:keys', 'act', T('app.sys.shortcuts'), '?', 'i-keyboard', openKeys, 'keyboard');
+  if (q) a('ask', T('app.palette.ask', { q: S.pal.q.trim() }), 'i-spark', () => openChat({ draft: S.pal.q.trim() }), { hint: T('app.palette.ask_hint'), kw: q, always: true });
+  a('act:refresh', T('app.refresh'), 'i-refresh', refresh, { keys: ['R'] });
+  const unread = inboxItems().filter(it => it.kind !== 'suggestion' && it.actions.includes('ack'));
+  if (unread.length) a('act:read-all', T('app.palette.read_all', { n: fmt.num(unread.length) }), 'i-check', () => inboxDo('ack', unread), { kw: 'inbox read got it ack' });
+  a('act:pause', T('app.palette.pause'), 'i-bell', pauseAlerts, { kw: 'mute snooze quiet 1h hour' });
+  if (local && !S.meta.demo) a('act:scan', T('app.palette.scan'), 'i-wifi', paletteScan, { kw: 'scan discover sweep devices' });
+  a('act:csv', T('ui.export_csv'), 'i-download', () => download('/api/export/devices.csv'), { kw: 'csv excel' });
+  a('act:report', T('ui.export_report'), 'i-download', () => download('/api/export/report.md'), { kw: 'markdown md' });
+  a('act:print', T('app.fam.print'), 'i-print', () => window.open(api('/report/weekly'), '_blank', 'noopener'), { kw: 'pdf' });
+  a('act:share', T('app.palette.report'), 'i-print', () => go('#/report'), { kw: 'report share send helper friend pdf markdown html' });
+  a('act:bed', T('app.bed.add'), 'i-bed', () => { if (S.base === 'family' && S.fam.bed) { if (!S.fam.form) openBedForm(null); } else { S.fam.wantForm = true; go('#/family'); } });
+  if (local) a('act:check', T('app.sec.check_all'), 'i-port', confirmCheck, { kw: 'port scan' });
+  a('act:chat', T('app.d.ask_any'), 'i-spark', () => openChat(), { keys: ['c'], kw: 'ai chat' });
+  a('act:keys', T('app.sys.shortcuts'), 'i-keyboard', openKeys, { keys: ['?'], kw: 'keyboard' });
   // Stage Q: the Tuning panel and the quiet-hours settings
   const toCard = key => () => { go('#/settings'); setTimeout(() => { const c = document.querySelector(`[data-key="${key}"]`); if (c) c.scrollIntoView({ block: 'start' }); }, 150); };
-  a('act:tuning', 'act', T('app.tune.title'), '', 'i-bell', toCard('tuning'), 'tune mute snooze alerts sensitivity');
-  if (local) a('act:quiet', 'act', T('settings.section.quiet'), '', 'i-moon', toCard('set-quiet'), 'quiet hours night do not disturb');
-  if (inboxCount()) a('act:inbox-undo', 'act', T('app.inbox.undo_last'), 'u', 'i-refresh', inboxUndo);
+  a('act:tuning', T('app.tune.title'), 'i-bell', toCard('tuning'), { kw: 'tune mute snooze alerts sensitivity' });
+  if (local) a('act:quiet', T('settings.section.quiet'), 'i-moon', toCard('set-quiet'), { kw: 'quiet hours night do not disturb' });
+  if (inboxCount()) a('act:inbox-undo', T('app.inbox.undo_last'), 'i-refresh', inboxUndo, { keys: ['u'] });
+  if (UNDO_STACK.length) a('act:undo', T('app.key.undo'), 'i-refresh', undoLast, { keys: [MOD, 'Z'] });
   if (local) {
-    a('act:pair', 'act', T('app.palette.pair'), '', 't-phone', () => { go('#/settings'); setTimeout(() => { const P = S.pair; if (P.s && (P.s.lan || (P.s.require_auth && !S.meta.addon))) pairNew(); else toast(T('app.pair.need_lan')); }, 300); }, 'qr phone');
-    a('act:backup', 'act', T('app.bk.download'), '', 'i-download', () => download('/api/backup'), 'backup json');
-    a('act:restore', 'act', T('app.bk.choose'), '', 'i-box', () => { go('#/settings'); setTimeout(() => { const f = $('#bk-file'); if (f) f.click(); }, 300); }, 'restore import');
-    a('act:wizard', 'act', T('app.wz.open'), '', 'i-check', () => go('#/welcome'), 'setup wizard');
+    a('act:pair', T('app.palette.pair'), 't-phone', () => { go('#/settings'); setTimeout(() => { const P = S.pair; if (P.s && (P.s.lan || (P.s.require_auth && !S.meta.addon))) pairNew(); else toast(T('app.pair.need_lan')); }, 300); }, { kw: 'qr phone' });
+    a('act:backup', T('app.bk.download'), 'i-download', () => download('/api/backup'), { kw: 'backup json' });
+    a('act:restore', T('app.bk.choose'), 'i-box', () => { go('#/settings'); setTimeout(() => { const f = $('#bk-file'); if (f) f.click(); }, 300); }, { kw: 'restore import' });
+    a('act:wizard', T('app.wz.open'), 'i-check', () => go('#/welcome'), { kw: 'setup wizard' });
   }
-  if (notifySupported()) a('act:notify', 'act', T(notifyState() === 'on' ? 'app.notify.disable' : 'app.notify.enable'), '', 'i-bell', toggleNotify);
-  THEMES.forEach(t => a('theme:' + t, 'act', T('app.palette.theme', { name: T('app.theme.' + t) }), '', THEME_ICON[t], () => setTheme(t), 'theme'));
-  if (q) (S.meta.languages || []).forEach(l => a('lang:' + l.code, 'act', T('app.palette.lang', { name: l.name }), l.code, 'i-globe', () => setLang(l.code, true), 'language'));
+  if (notifySupported()) a('act:notify', T(notifyState() === 'on' ? 'app.notify.disable' : 'app.notify.enable'), 'i-bell', toggleNotify);
+  a('act:single', T(singleKeys() ? 'app.palette.single_off' : 'app.palette.single_on'), 'i-keyboard', () => setSingleKeys(!singleKeys()), { kw: 'shortcuts keyboard' });
+  THEMES.forEach(t => a('theme:' + t, T('app.palette.theme', { name: T('app.theme.' + t) }), THEME_ICON[t], () => setTheme(t), { kw: 'theme' }));
+  // a language is also found by its name in English and in the current language ("chinese", "日文")
+  if (q) (S.meta.languages || []).forEach(l => a('lang:' + l.code, T('app.palette.lang', { name: l.name }), 'i-globe', () => setLang(l.code, true),
+    { hint: l.code, kw: 'language ' + langNames(l.code) }));
   return acts;
 }
-// What a device row offers: open it, (un)trust it, mute its inbox alerts
-function deviceActions(d) {
-  const name = dname(d), out = [{ id: 'dev:' + d.mac, group: 'dev', label: name, hint: (d.ips || [])[0] || '', ic: 't-' + typeKey(d.type), run: () => go(devHref(d.mac)) }];
-  out.push(d.trusted ? { id: 'untrust:' + d.mac, group: 'act', label: T('app.palette.untrust', { name }), hint: '', ic: 'i-x', run: () => unack(d.mac, '', name) }
-                     : { id: 'trust:' + d.mac, group: 'act', label: T('app.palette.trust', { name }), hint: 't', ic: 'i-check', run: () => ack(d.mac, '', name) });
-  const mutable = inboxItems().filter(it => it.mac === d.mac && it.actions.includes('mute'));
-  if (mutable.length) out.push({ id: 'mute:' + d.mac, group: 'act', label: T('app.palette.mute', { name, n: fmt.num(mutable.length) }), hint: 'm', ic: 'i-bell', run: () => inboxDo('mute', mutable) });
+function langNames(code) {
+  return [S.lang, 'en'].map(ui => {
+    try { return new Intl.DisplayNames([ui], { type: 'language' }).of(code) || ''; } catch (e) { return ''; }
+  }).join(' ');
+}
+// People, "Shared" and rooms (the family's groups of devices)
+function peopleEntries() {
+  const out = persons().map(p => {
+    const n = devices().filter(d => d.owner === p.name).length;
+    return palEntry('person:' + p.id, 'ppl', p.name, { ic: 'i-user', hint: T('app.palette.n_devices', { n: fmt.num(n) }), run: () => go('#/people/' + p.id), kw: T('app.ppl.person') });
+  });
+  const shared = devices().filter(d => d.shared).length;
+  if (shared) out.push(palEntry('shared', 'ppl', T('app.ppl.shared'), { ic: 'i-family', hint: T('app.palette.n_devices', { n: fmt.num(shared) }), run: () => go('#/people') }));
+  Array.from(new Set(devices().map(d => d.room).filter(Boolean))).forEach(r =>
+    out.push(palEntry('room:' + r, 'ppl', T('app.palette.room', { room: r }), { ic: 'i-home', kw: T('app.room'), run: () => go('#/devices?room=' + enc(r)) })));
   return out;
+}
+// Settings by label, section and key (this computer only: GET /api/settings, on first use)
+function settingEntries() {
+  if (S.meta.remote || !S.ai.s) return [];
+  const secs = Object.fromEntries((S.ai.s.sections || []).map(s => [s.key, s.label]));
+  return (S.ai.s.items || []).filter(it => !it.secret).map(it => palEntry('set:' + it.key, 'set', it.label, {
+    ic: SET_ICON[it.section] || 'i-gear', hint: secs[it.section] || '', kw: it.key, run: () => gotoSetting(it.key) }));
+}
+function gotoSetting(key) {
+  go('#/settings');
+  let tries = 0;
+  (function find() {
+    const f = document.querySelector(`.set-field[data-key="${key}"]`);
+    if (!f) { if (++tries < 20) setTimeout(find, 100); return; }
+    f.scrollIntoView({ block: 'center' });
+    const c = f.querySelector('input,select,textarea,button'); if (c) c.focus({ preventScroll: true });
+  })();
+}
+// What a device row offers: open it, (un)trust it, mute its inbox alerts (now / for an hour)
+function deviceActions(d) {
+  const name = dname(d), out = [palEntry('dev:' + d.mac, 'dev', name, { hint: (d.ips || [])[0] || '', ic: 't-' + typeKey(d.type), run: () => go(devHref(d.mac)) })];
+  out.push(d.trusted ? palEntry('untrust:' + d.mac, 'act', T('app.palette.untrust', { name }), { ic: 'i-x', run: () => unack(d.mac, '', name) })
+                     : palEntry('trust:' + d.mac, 'act', T('app.palette.trust', { name }), { ic: 'i-check', run: () => ack(d.mac, '', name) }));
+  const mine = inboxItems().filter(it => it.mac === d.mac);
+  const mutable = mine.filter(it => it.actions.includes('mute'));
+  if (mutable.length) out.push(palEntry('mute:' + d.mac, 'act', T('app.palette.mute', { name, n: fmt.num(mutable.length) }), { ic: 'i-bell', run: () => inboxDo('mute', mutable) }));
+  const kinds = Array.from(new Set(mine.map(it => it.why && it.why.tune && it.why.tune.mac ? it.why.tune.kind : null).filter(Boolean)));
+  if (kinds.length) out.push(palEntry('mute1h:' + d.mac, 'act', T('app.palette.mute_hour', { name }), { ic: 'i-moon', run: () => snoozeKinds(kinds, d.mac, name) }));
+  return out;
+}
+// "off" for 1 hour per kind (POST /api/tuning, the Tune sheet's "1 hour"), ONE toast whose
+// Undo puts every row back. Kinds the user already tuned for this target are left alone,
+// so a pause never shortens an "off until I change it".
+async function snoozeKinds(kinds, mac, name) {
+  let tuned = [];
+  try { tuned = ((await getJSON('/api/tuning')).entries || []).filter(e => e.source !== 'snooze' && e.mac === (mac || 'all')).map(e => e.kind); }
+  catch (e) { fail(e); return; }
+  const todo = kinds.filter(k => !tuned.includes(k)), done = [];
+  if (!todo.length) { toast(T('app.palette.pause_none')); return; }
+  try {
+    for (const kind of todo) done.push(Object.assign({ kind }, await postJSON('/api/tuning', { kind, mac: mac || null, level: 'off', for: '1h' })));
+  } catch (e) { fail(e); }
+  if (!done.length) return;
+  const when = T('app.tune.until', { when: fmt.date(done[0].until) });
+  toast(mac ? T('app.palette.mute_hour_done', { name, until: when }) : T('app.palette.pause_done', { until: when }), { undo: async () => {
+    try { for (const r of done) await postJSON('/api/tuning/undo', { kind: r.kind, mac: r.mac, before: r.before }); toast(T('app.toast.undone')); } catch (e) { fail(e); }
+    afterTune();
+  } });
+  afterTune();
+}
+function pauseAlerts() { return snoozeKinds(PAUSE_KINDS, null, ''); }
+// "Scan the network now": the first-run wizard's sweep (POST /api/setup/scan, this computer
+// only); the toast says when it is done.
+async function paletteScan() {
+  if (S.setup.scan && S.setup.scan.state === 'running') { toast(T('app.wz.scanning')); return; }
+  S.setup.scan = null; S.setup.scanToast = true;
+  await wzScan();
+  if (S.setup.scan) toast(T('app.wz.scanning')); else S.setup.scanToast = false;   // refused: wzScan said why
 }
 // Stage P: "Assign <device> to <person>" when the query names a person (or "Shared") and
 // what is left of it matches a device: "ipad 小孩", "assign tv to shared"
 function assignActions(q) {
   const targets = persons().map(p => ({ v: 'p:' + p.id, name: p.name })).concat([{ v: 'shared', name: T('app.ppl.shared') }])
-    .filter(t => t.name && q.includes(t.name.toLowerCase()));
+    .filter(t => t.name && q.includes(fold(t.name)));
   const out = [];
   targets.forEach(t => {
     // drop the person's name and the "assign / to" words (whole words; CJK ones anywhere)
-    const kw = T('app.palette.assign_kw').toLowerCase().split(/\s+/).filter(Boolean);
-    let rest = q.split(t.name.toLowerCase()).join(' ');
+    const kw = fold(T('app.palette.assign_kw')).split(/\s+/).filter(Boolean);
+    let rest = q.split(fold(t.name)).join(' ');
     kw.filter(w => /[　-鿿가-힯]/.test(w)).forEach(w => { rest = rest.split(w).join(' '); });
     rest = rest.split(/\s+/).filter(w => w && !kw.includes(w)).join(' ');
     if (!rest) return;
     devices().filter(d => d.mac && assignValue(d) !== t.v)
       .map(d => ({ d, s: fuzzy(rest, [dname(d), d.vendor, d.mac, (d.ips || []).join(' ')].join(' ')) }))
       .filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 3)
-      .forEach(x => out.push({ s: x.s + 20, x: { id: 'assign:' + x.d.mac + ':' + t.v, group: 'act', label: T('app.palette.assign', { name: dname(x.d), person: t.name }),
-                                                   hint: '', ic: 'i-user', run: () => assignDevices([x.d.mac], t.v) } }));
+      .forEach(x => out.push({ s: x.s + 20, x: palEntry('assign:' + x.d.mac + ':' + t.v, 'act', T('app.palette.assign', { name: dname(x.d), person: t.name }),
+                                                  { ic: 'i-user', run: () => assignDevices([x.d.mac], t.v) }) }));
   });
   return out;
 }
+// a device is found by its name, label, owner, room, vendor, IP and MAC (also a prefix
+// typed with or without separators: "aa:bb", "aabb")
+const devHay = d => [dname(d), d.label, d.hostname, d.vendor, d.mac, (d.mac || '').replace(/[:-]/g, ''), (d.ips || []).join(' '), d.owner, d.room,
+                     d.type_info && d.type_info.type_name].join(' ');
 function paletteItems() {
-  const raw = S.pal.q.trim(), q = raw.toLowerCase(), out = [];
+  const raw = S.pal.q.trim(), q = fold(raw), out = [];
   const acts = paletteActions(q);
   if (!q) {   // recent first, then every section and action
     const byId = {};
-    acts.forEach(x => { byId[x.id] = x; });
+    acts.concat(peopleEntries(), settingEntries()).forEach(x => { byId[x.id] = x; });
     loadRecent().forEach(id => {
       const mac = id.startsWith('dev:') ? id.slice(4) : null, d = mac && findDev(mac);
       const it = d ? deviceActions(d)[0] : byId[id];
@@ -4413,76 +4859,118 @@ function paletteItems() {
     });
     return out.concat(acts.filter(x => !out.some(r => r.id === x.id)));
   }
-  const score = (x, extra) => fuzzy(q, x.label + ' ' + (x.hint || '') + ' ' + (extra || ''));
-  const devs = devices().map(d => ({ d, s: fuzzy(q, [dname(d), d.vendor, d.mac, (d.ips || []).join(' '), d.owner, d.room].join(' ')) }))
-    .filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8);
+  const score = x => fuzzy(q, x.label + ' ' + (x.hint || '') + ' ' + (x.kw || ''));
+  const devs = devices().map(d => ({ d, s: fuzzy(q, devHay(d)) })).filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8);
   devs.forEach(x => out.push(deviceActions(x.d)[0]));
-  const rm = S.pal.remote;
-  if (rm && rm.q === raw) {
-    (rm.services || []).slice(0, 6).forEach(v => out.push({ id: 'svc:' + v.id, group: 'svc', label: v.name, hint: T('ui.search_counts', { n: fmt.num(v.queries), devices: fmt.num(v.devices) }), ic: 'i-box', run: () => go('#/service/' + enc(v.id)) }));
-    (rm.domains || []).slice(0, 6).forEach(d => out.push({ id: 'dom:' + d.domain, group: 'dom', label: d.domain, hint: T('ui.search_counts', { n: fmt.num(d.queries), devices: fmt.num(d.devices) }), ic: 'i-globe', run: () => go('#/domain/' + enc(d.domain)) }));
-  }
-  const ranked = acts.map(x => ({ x, s: score(x, x.kw) })).filter(r => r.s > 0);
+  const top = (list, n) => list.map(x => ({ x, s: score(x) })).filter(r => r.s > 0).sort((a, b) => b.s - a.s).slice(0, n).map(r => r.x);
+  const ranked = acts.filter(x => !x.always).map(x => ({ x, s: score(x) })).filter(r => r.s > 0);
   devs.slice(0, 3).forEach(r => deviceActions(r.d).slice(1).forEach(x => ranked.push({ x, s: r.s - 1 })));
   assignActions(q).forEach(r => ranked.push(r));
-  ['nav', 'act'].forEach(g => ranked.filter(r => r.x.group === g).sort((a, b) => b.s - a.s).slice(0, g === 'act' ? 12 : 8).forEach(r => out.push(r.x)));
+  const group = (g, n) => ranked.filter(r => r.x.group === g).sort((a, b) => b.s - a.s).slice(0, n).forEach(r => out.push(r.x));
+  group('nav', 8);
+  top(peopleEntries(), 6).forEach(x => out.push(x));
+  const rm = S.pal.remote;
+  if (rm && rm.q === raw) {
+    (rm.services || []).slice(0, 6).forEach(v => out.push(palEntry('svc:' + v.id, 'svc', v.name, { hint: T('ui.search_counts', { n: fmt.num(v.queries), devices: fmt.num(v.devices) }), ic: 'i-box', run: () => go('#/service/' + enc(v.id)) })));
+    (rm.domains || []).slice(0, 6).forEach(d => out.push(palEntry('dom:' + d.domain, 'dom', d.domain, { hint: T('ui.search_counts', { n: fmt.num(d.queries), devices: fmt.num(d.devices) }), ic: 'i-globe', run: () => go('#/domain/' + enc(d.domain)) })));
+  }
+  group('act', 12);
+  top(settingEntries(), 8).forEach(x => out.push(x));
+  // last: hand the words to the assistant (pre-filled, never sent)
+  acts.filter(x => x.always).forEach(x => out.push(Object.assign({}, x, { group: 'ask' })));
   return out;
 }
-const PAL_GROUPS = { recent: 'app.palette.recent', dev: 'ui.search_devices', svc: 'ui.search_services', dom: 'ui.search_domains',
-                     nav: 'app.palette.sections', act: 'app.palette.actions' };
+const PAL_GROUPS = { recent: 'app.palette.recent', dev: 'ui.search_devices', ppl: 'app.palette.people', svc: 'ui.search_services',
+                     dom: 'ui.search_domains', nav: 'app.palette.sections', act: 'app.palette.actions', set: 'app.nav.settings',
+                     ask: 'app.nav.ai' };
+// a shortcut as keys: ["g", "o"] -> g then o; [MOD, "Z"] -> Ctrl+Z / ⌘Z
+const MOD = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? '⌘' : 'Ctrl';
+function keysHtml(keys) {
+  if (!keys || (!singleKeys() && keys[0] !== MOD)) return '';
+  const k = s => html`<kbd>${s}</kbd>`;
+  return html`<span class="pkeys" aria-hidden="true">${keys[0] === MOD ? html`${k(MOD)}${k(keys[1])}` : keys.map(k)}</span>`;
+}
+// WAI-ARIA APG combobox + listbox with grouped options: <li role="group"> per group, the
+// input owns aria-activedescendant; the count is announced politely.
 function renderPalette() {
   const items = S.pal.items = paletteItems();
   S.pal.sel = Math.min(S.pal.sel, Math.max(0, items.length - 1));
-  let last = null; const rows = [];
+  const groups = [];
   items.forEach((it, i) => {
-    if (it.group !== last) { rows.push(html`<li class="ph" role="presentation" data-key="h-${it.group}">${T(PAL_GROUPS[it.group])}</li>`); last = it.group; }
-    rows.push(html`<li class="pi" role="option" id="pi-${i}" data-i="${i}" aria-selected="${String(i === S.pal.sel)}" data-key="${it.group}:${it.label}:${it.hint}">
-      ${icon(it.ic)}<span class="pl">${it.label}</span>${it.hint ? html`<span class="phint">${it.hint}</span>` : ''}</li>`);
+    if (!groups.length || groups[groups.length - 1].g !== it.group) groups.push({ g: it.group, rows: [] });
+    groups[groups.length - 1].rows.push([it, i]);
   });
-  morph($('#pallist'), rows.length ? rows : html`<li class="pnone" role="presentation">${T('app.palette_none')}</li>`);
+  morph($('#pallist'), groups.length ? groups.map(({ g, rows }, gi) => html`<li role="group" aria-labelledby="pg-${gi}" data-key="g-${g}-${gi}">
+      <div class="ph" id="pg-${gi}" role="presentation">${T(PAL_GROUPS[g])}</div>
+      <ul role="presentation">${rows.map(([it, i]) => html`<li class="pi${it.group === 'ask' ? ' two' : ''}" role="option" id="pi-${i}" data-i="${i}" aria-selected="${String(i === S.pal.sel)}" data-key="${it.group}:${it.id}">
+        ${icon(it.ic)}<span class="pl">${it.label}</span>${it.hint ? html`<span class="phint">${it.hint}</span>` : ''}${keysHtml(it.keys)}</li>`)}</ul></li>`)
+    : html`<li class="pnone" role="presentation">${T('app.palette_none')}</li>`);
   const inp = $('#palq');
+  inp.setAttribute('aria-expanded', String(items.length > 0));
   if (items.length) inp.setAttribute('aria-activedescendant', 'pi-' + S.pal.sel); else inp.removeAttribute('aria-activedescendant');
   const sel = $('#pi-' + S.pal.sel); if (sel) sel.scrollIntoView({ block: 'nearest' });
+  const n = T('app.palette.n_results', { n: fmt.num(items.length) });
+  clearTimeout(S.pal.sayT);
+  S.pal.sayT = setTimeout(() => { const c = $('#palcount'); if (c && S.pal.open && c.textContent !== n) c.textContent = n; }, 400);
 }
 let palTimer = null;
 function openPalette() {
   if (S.pal.open) return;
-  S.pal = { open: true, q: '', sel: 0, remote: null, items: [], back: document.activeElement };
-  $('#palette').hidden = false; $('#palq').value = ''; renderPalette(); $('#palq').focus();
+  S.pal = { open: true, q: '', sel: 0, remote: null, items: [], back: document.activeElement, inert: [] };
+  // aria-modal is a promise: the page behind (and an open drawer / chat) can't be reached
+  // while the palette is open - only what was not inert already, so closing gives back
+  // exactly that (the drawer keeps its own inert when it is closed)
+  S.pal.inert = ['.app', '#drawer', '#chatpanel'].map(s => $(s)).filter(el => el && !el.inert);
+  S.pal.inert.forEach(el => { el.inert = true; });
+  $('#palette').hidden = false; $('#palq').value = ''; $('#palcount').textContent = ''; renderPalette(); $('#palq').focus();
+  // settings are found by name too: their list loads on first use (this computer only)
+  if (!S.meta.remote && !S.ai.s && !S.ai.loading) { S.ai.loading = true; loadAI().finally(() => { S.ai.loading = false; if (S.pal.open) renderPalette(); }); }
 }
 function closePalette(keepFocus) {
   if (!S.pal.open) return;
   S.pal.open = false; $('#palette').hidden = true;
+  // (a drawer that closed meanwhile - Back, a live update - stays inert)
+  (S.pal.inert || []).forEach(el => { if (el.id !== 'drawer' || el.classList.contains('open')) el.inert = false; }); S.pal.inert = [];
   if (!keepFocus && S.pal.back && document.contains(S.pal.back)) S.pal.back.focus({ preventScroll: true });
 }
+// Focus goes back to where it was BEFORE the entry runs: an entry that opens a page, the
+// drawer or the chat then moves it on itself, one that does not (theme, mute) leaves it there.
 function runPalette(i) {
   const it = S.pal.items[i]; if (!it) return;
-  if (it.id) saveRecent(it.id);
-  closePalette(true); it.run();
+  if (it.id && it.id !== 'ask') saveRecent(it.id);
+  closePalette(false); it.run();
 }
 $('#palq').addEventListener('input', e => {
   S.pal.q = e.target.value; S.pal.sel = 0; renderPalette();
   clearTimeout(palTimer);
   const q = S.pal.q.trim();
-  if (q.length >= 2) palTimer = setTimeout(() => getJSON('/api/search?q=' + enc(q)).then(r => {
+  // (the static demo has no server search: pages, devices and actions are matched here)
+  if (q.length >= 2 && !DEMO) palTimer = setTimeout(() => getJSON('/api/search?q=' + enc(q)).then(r => {
     if (S.pal.open && S.pal.q.trim() === q) { S.pal.remote = Object.assign({ q }, r); renderPalette(); }
   }).catch(() => {}), 160);
 });
 $('#palq').addEventListener('keydown', e => {
+  if (e.isComposing || e.keyCode === 229) return;   // the IME's own Enter / arrows
   const n = S.pal.items.length;
   if (e.key === 'ArrowDown') { e.preventDefault(); S.pal.sel = n ? (S.pal.sel + 1) % n : 0; renderPalette(); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); S.pal.sel = n ? (S.pal.sel - 1 + n) % n : 0; renderPalette(); }
-  else if (e.key === 'Home') { e.preventDefault(); S.pal.sel = 0; renderPalette(); }
-  else if (e.key === 'End') { e.preventDefault(); S.pal.sel = Math.max(0, n - 1); renderPalette(); }
+  else if (e.key === 'Home' && e.ctrlKey) { e.preventDefault(); S.pal.sel = 0; renderPalette(); }
+  else if (e.key === 'End' && e.ctrlKey) { e.preventDefault(); S.pal.sel = Math.max(0, n - 1); renderPalette(); }
+  else if (e.key === 'PageDown' || e.key === 'PageUp') { e.preventDefault(); S.pal.sel = Math.max(0, Math.min(n - 1, S.pal.sel + (e.key === 'PageDown' ? 8 : -8))); renderPalette(); }
   else if (e.key === 'Enter') { e.preventDefault(); runPalette(S.pal.sel); }
-  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePalette(); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (S.pal.q) { e.target.value = S.pal.q = ''; S.pal.sel = 0; renderPalette(); } else closePalette(); }
   else if (e.key === 'Tab') e.preventDefault();      // focus stays in the palette
 });
 $('#pallist').addEventListener('mousemove', e => {
   const li = e.target.closest('.pi'); if (li && +li.dataset.i !== S.pal.sel) { S.pal.sel = +li.dataset.i; renderPalette(); }
 });
 $('#pallist').addEventListener('click', e => { const li = e.target.closest('.pi'); if (li) runPalette(+li.dataset.i); });
-$('#palette').addEventListener('mousedown', e => { if (e.target.id === 'palette') { e.preventDefault(); closePalette(); } });
+// A click outside the panel closes it; anywhere inside (a result, a group heading, the hint
+// line) the text box keeps the focus - so Esc, Tab and the arrows always reach it.
+$('#palette').addEventListener('mousedown', e => {
+  if (e.target.id === 'palette') { e.preventDefault(); closePalette(); }
+  else if (e.target !== $('#palq') && !(e.target.id === 'pallist' && e.offsetX >= e.target.clientWidth)) e.preventDefault();
+});   // (not on the list's scrollbar: dragging it must work; Esc / Tab still reach the palette)
 
 // ---------------------------------------------------------------------------------------
 // Events (all delegated, so morph() never has to re-bind anything)
@@ -4495,6 +4983,44 @@ document.addEventListener('pointerout', e => { const a = e.target.closest && e.t
 document.addEventListener('wheel', mapWheel, { passive: false });
 document.addEventListener('click', e => { if (MP.drag && e.target.closest && e.target.closest('#mapsvg')) { e.preventDefault(); e.stopPropagation(); MP.drag = false; } }, true);
 document.addEventListener('focusin', e => { const a = e.target.closest && e.target.closest('.mnode'); mapTip(a || null); });
+// Round 9 W: in the static demo a button that would change something (or needs a running
+// netwarden) explains itself instead - before anything optimistic happens on the page.
+// Everything else (pages, drawers, filters, the palette, theme, language) works as usual;
+// postJSON() refusing is the safety net behind this list.
+const DEMO_WRITES = new Set(['mute', 'trust', 'untrust', 'edit', 'ib-do', 'ib-bulk', 'ib-undo', 'set-bool', 'bk-mode',
+  'bk-apply', 'wz-go', 'wz-next', 'wz-finish', 'wz-skip', 'wz-ai', 'wz-lan', 'tune', 'tune-set', 'tune-restore',
+  'quiet-seen', 'use-name', 'sug-set', 'probe-off', 'pair-revoke', 'pair-revoke-all', 'lan-toggle', 'logout', 'bed-new',
+  'bed-edit', 'bed-delete', 'bed-toggle', 'ppl-new', 'ppl-edit', 'add-person-for', 'ppl-delete', 'ppl-add-dev',
+  'ppl-rm-dev', 'ppl-link', 'ppl-link-no', 'pres-on', 'pres-off', 'pres-forget', 'pres-dev', 'pres-default',
+  'pres-notify', 'bulk-assign']);
+const DEMO_INSTALL = new Set(['check', 'check-all', 'conn-test', 'wz-scan', 'wz-test', 'ai-test', 'ai-preview',
+  'bk-download', 'pair-new']);
+if (DEMO) {
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-act]');
+    if (!b || b.disabled) return;
+    const act = b.dataset.act;
+    const key = DEMO_WRITES.has(act) ? 'app.demo.readonly' : DEMO_INSTALL.has(act) ? 'app.demo.needs_install'
+      : act === 'share-opt' && b.dataset.k === 'privacy' && b.dataset.v === 'full' ? 'app.demo.full_report' : '';
+    if (!key) return;
+    e.preventDefault(); e.stopPropagation();
+    demoNote(T(key));
+  }, true);
+  document.addEventListener('submit', e => {
+    if (e.target.closest('form')) { e.preventDefault(); e.stopPropagation(); demoNote(); }
+  }, true);
+  // a field that saves on change (a device's name / owner / room, "assign to", a backup file)
+  document.addEventListener('change', e => {
+    const el = e.target, d = el.dataset || {};
+    if (!((d.draft && el.closest('form[data-drawer-form]')) || 'assign' in d || 'bkFile' in d)) return;
+    e.stopPropagation();
+    if (el.tagName === 'SELECT') Array.from(el.options).forEach(o => { o.selected = o.defaultSelected; });
+    else if (el.type !== 'file') el.value = el.defaultValue;
+    else el.value = '';
+    if (d.mac) delete S.draft[d.mac];
+    demoNote();
+  }, true);
+}
 document.addEventListener('click', e => {
   if (S.more && !e.target.closest('#bottomnav')) { S.more = false; render(); }   // a click outside closes "More"
   const b = e.target.closest('[data-act]');
@@ -4595,7 +5121,10 @@ document.addEventListener('click', e => {
     case 'extip': S.showExtIp = !S.showExtIp; render(); break;
     case 'use-name': saveDevice(mac, { label: b.dataset.name || '' }); break;
     case 'copy': copyText(b.dataset.text || '', b); break;
+    case 'share-opt': if (SHARE_OPTS[b.dataset.k] && SHARE_OPTS[b.dataset.k].includes(b.dataset.v)) { S.share[b.dataset.k] = b.dataset.v; render(); } break;
+    case 'share-copy': shareCopy(b); break;
     case 'retry': refresh(); break;
+    case 'demo-hide': demoHide(); break;
     case 'boot-retry': bootRetry(true); break;
     case 'close': closeDrawer(); break;
     case 'theme': setTheme(b.dataset.v); break;
@@ -4613,6 +5142,7 @@ document.addEventListener('click', e => {
     case 'copy-msg': { const m = S.chat.messages[+b.dataset.i]; if (m) copyText(m.content, b); break; }
     case 'notify': toggleNotify(); break;
     case 'keys-close': closeKeys(); break;
+    case 'single-keys': setSingleKeys(!singleKeys()); break;
     case 'ai-test': testAI(); break;
     case 'ai-preview': openPreview(); break;
     case 'prev-close': closePreview(); break;
@@ -4767,8 +5297,16 @@ const chatPanelOpen = () => S.chat.open && S.base !== 'ai';
 const chatIsSheet = () => window.matchMedia('(max-width: 760px)').matches;   // app.css: the bottom sheet
 document.addEventListener('keydown', e => {
   const el = e.target;
+  // an IME composition (Chinese / Japanese / Korean typing) owns every key until it ends
+  if (e.isComposing || e.keyCode === 229) return;
   if ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (S.pal.open) closePalette(); else { closeKeys(); openPalette(); } return; }
-  if (S.pal.open) return;
+  if (S.pal.open) {                // modal: whatever has the focus, no page shortcut fires
+    if (el !== $('#palq')) {       // (the text box handles its own keys)
+      if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+      else if (e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); $('#palq').focus(); }
+    }
+    return;
+  }
   if (S.keys.open) {               // the shortcuts sheet is modal
     if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); closeKeys(); }
     else if (e.key === 'Tab') trapFocus(e, [$('#keysheet')]);
@@ -4808,7 +5346,15 @@ document.addEventListener('keydown', e => {
       const d = findDev(m) || S.dev.d; if (d) el.value = current(d, el.dataset.draft);
       el.blur(); return;
     }
-    if (e.key === 'Enter' && el.tagName === 'INPUT' && el.closest('form[data-drawer-form]')) { e.preventDefault(); el.blur(); return; }
+    // Enter saves (the blur fires "change") and the cursor stays where it was (round 9 U)
+    if (e.key === 'Enter' && el.tagName === 'INPUT' && el.closest('form[data-drawer-form]')) { e.preventDefault(); el.blur(); el.focus({ preventScroll: true }); return; }
+  }
+  // round 9 U: Enter in the Devices filter goes to the results - the device itself when
+  // only one is left, else the first row (Tab / arrows from there)
+  if (e.key === 'Enter' && el.dataset && el.dataset.filter === 'q' && S.base === 'devices') {
+    const list = filtered().filter(d => d.mac);
+    if (list.length === 1) { e.preventDefault(); go(devHref(list[0].mac)); return; }
+    const a = $('#view .tbl a.dev'); if (a) { e.preventDefault(); a.focus(); return; }
   }
   // Enter sends, Shift+Enter is a new line (and an IME composition's Enter is left alone)
   if (el.id === 'chatq' && e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); chat('send'); return; }
@@ -4825,13 +5371,18 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (isTyping(el) || e.altKey || e.ctrlKey || e.metaKey) return;
+  const inboxHere = S.base === 'inbox' && !drawerOpen() && !chatPanelOpen();
+  if (!singleKeys()) {             // WCAG 2.1.4: only Enter (open the inbox row) is left
+    if (e.key === 'Enter' && inboxHere && inboxKey(e)) e.preventDefault();
+    return;
+  }
   const gPending = Date.now() - S.gAt < 1500;
   S.gAt = 0;
   if (gPending && GO_KEYS[e.key.toLowerCase()]) { e.preventDefault(); go('#/' + GO_KEYS[e.key.toLowerCase()]); }
   else if (e.key === 'g' || e.key === 'G') S.gAt = Date.now();
-  else if (S.base === 'inbox' && !drawerOpen() && !chatPanelOpen() && inboxKey(e)) e.preventDefault();
+  else if (inboxHere && inboxKey(e)) e.preventDefault();
   else if (e.key === '?') { e.preventDefault(); openKeys(); }
-  else if (e.key === '/') { e.preventDefault(); openPalette(); }
+  else if (e.key === '/') { e.preventDefault(); if (!focusFilter()) openPalette(); }
   else if (e.key === 'c' || e.key === 'C') { e.preventDefault(); toggleChat(); }
   else if (e.key === 'r' || e.key === 'R') refresh();
   else if (/^[1-9]$/.test(e.key) && GROUPS[+e.key - 1]) go('#/' + GROUPS[+e.key - 1][1][0]);   // 1..7 = the places
@@ -4842,6 +5393,8 @@ document.addEventListener('keydown', e => {
 const isDrawerRoute = r => ['device', 'service', 'domain'].includes(r.name);
 window.addEventListener('hashchange', () => {
   S.cameFromBase = isDrawerRoute(parseHash()) && !isDrawerRoute(S.route);
+  const id = entryVisit();          // a known entry = Back / Forward: its scroll comes back
+  S.backY = id && typeof scrollMap[id] === 'number' ? scrollMap[id] : null;
   onRoute();
 });
 document.addEventListener('visibilitychange', () => {
@@ -4867,6 +5420,14 @@ setInterval(tick, 5000);
     if (!mr.ok) throw new Error('meta');
     S.meta = await mr.json();
   } catch (e) { bootFailed(); return; }
+  if (DEMO) {
+    // the static demo: no Accept-Language reached a server, and "now" is when it was built
+    // (every time in the saved answers is relative to that moment)
+    S.meta.browser_lang = navLang(S.meta.languages.map(l => l.code));
+    const built = parseTs((S.meta.static_demo || {}).built_at);
+    if (built) S.skew = built - Date.now();
+    document.body.classList.add('static-demo');
+  }
   loadChat();   // needs meta.db_id
   $('#langsel').innerHTML = S.meta.languages.map(l => `<option value="${esc(l.code)}">${esc(l.name)}</option>`).join('');
   let saved = null; try { saved = localStorage.getItem(LANG_KEY); } catch (e) { /* private mode */ }
@@ -4879,7 +5440,11 @@ setInterval(tick, 5000);
     if (S.setup.s && S.setup.s.needed && (!h || h === 'overview')) history.replaceState(null, '', '#/welcome');
   }
   const r = parseHash(); S.base = PAGES.includes(r.name) ? r.name : (r.name === 'device' ? 'devices' : 'overview');
+  viewLoad();   // round 9 U: the views as they were left (a deep link's query still wins)
+  $('#palkbd').textContent = MOD === '⌘' ? '⌘K' : 'Ctrl K';
   if (!await setLang(codes.includes(saved) ? saved : (S.meta.browser_lang || S.meta.default_lang), false)) { bootFailed(); return; }
+  const id = entryVisit();   // a reload keeps its history entry: back to where it was scrolled
+  S.backY = id && typeof scrollMap[id] === 'number' ? scrollMap[id] : null;
   onRoute();
   if (['system', 'settings', 'welcome'].includes(S.base)) { loadAI(); loadPair(); }   // opened straight on one of them
   if (S.base === 'welcome') { loadSetup(); wzTick(); }
@@ -4895,7 +5460,7 @@ setInterval(tick, 5000);
 // localhost) whose single job is the "netwarden is not running" page when the server is
 // down. Network first, nothing personal cached (static/sw.js).
 function registerWorker() {
-  if (!('serviceWorker' in navigator) || !['127.0.0.1', 'localhost'].includes(location.hostname)) return;
+  if (DEMO || !('serviceWorker' in navigator) || !['127.0.0.1', 'localhost'].includes(location.hostname)) return;
   navigator.serviceWorker.register(url('/sw.js'), { scope: url('/') }).catch(() => { /* private mode / disabled: fine */ });
 }
 

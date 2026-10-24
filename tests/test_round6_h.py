@@ -620,7 +620,10 @@ class AddonFiles(unittest.TestCase):
 
     def test_schema_matches_the_option_mapping(self):
         schema, opts = self.cfg["schema"], self.cfg["options"]
-        self.assertEqual(set(schema), set(addon.OPTION_ENV) | set(addon.BOOL_OPTIONS))
+        self.assertEqual(set(schema), set(addon.OPTION_ENV) | set(addon.BOOL_OPTIONS)
+                         | set(addon.TLS_OPTIONS))
+        for k in addon.TLS_OPTIONS:   # optional: unset = certificates verified
+            self.assertEqual(schema[k], "bool?", k)
         for k in addon.SECRET_OPTIONS:
             self.assertEqual(schema[k], "password?", k)
         for k, v in schema.items():

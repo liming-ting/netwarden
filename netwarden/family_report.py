@@ -26,20 +26,26 @@ def _day(iso: str, tz: tzinfo) -> str:
     return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%d")
 
 
-def _security_lines(r: dict, lang: str) -> list:
-    """One plain line per open finding (already localized alerts.compute result)."""
+def _security_lines(r: dict, lang: str, domains: bool = True, changes: bool = True,
+                    new: bool = True) -> list:
+    """One plain line per open finding (already localized alerts.compute result). Also
+    the shareable report's findings (report.py): domains=False leaves a threat's domain
+    out, changes / new = False leave out what that report lists elsewhere."""
     t = lambda k, **kw: i18n.t(k, lang, **kw)  # noqa: E731
     sep = t("list_sep")
-    out = [f"{x['device']} → {x['domain']}: {x['label']}" for x in r["threats"]]
+    out = [f"{x['device']} → {x['domain']}: {x['label']}" if domains else f"{x['device']}: {x['label']}"
+           for x in r["threats"]]
     out += [f"{x['name']}: {x['port']} {x['service']} ({x['risk_name']})" for x in r["exposure"]]
     out += [x["text"] for x in r.get("upnp", [])]
     # bedtime hits are not listed again here: the report has its own bedtime section
     out += [x["text"] for x in r.get("unusual_hours", [])]
     out += [x["text"] for x in r.get("bandwidth_spikes", [])]
     out += [x["text"] for x in r.get("visibility", [])]
-    out += [t("rep.new_device", name=x["name"]) for x in r["new_devices"]]
-    out += [f"{x['name']}: {t('ui.started_using')} {sep.join(x['new_services'])}"
-            for x in r["behavior_changes"]]
+    if new:
+        out += [t("rep.new_device", name=x["name"]) for x in r["new_devices"]]
+    if changes:
+        out += [f"{x['name']}: {t('ui.started_using')} {sep.join(x['new_services'])}"
+                for x in r["behavior_changes"]]
     return out
 
 

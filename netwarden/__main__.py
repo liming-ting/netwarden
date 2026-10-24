@@ -12,6 +12,7 @@ netwarden - the one command:  python3 -m netwarden <command> [options]
     pair     a one-time QR code to open the dashboard on a phone (LAN mode: run --lan)
     backup   save your own notes (names, owners, trust, rules, settings) as JSON
     restore  bring a backup back (preview first; --mode merge|replace, --dry-run)
+    report   a shareable plain-language report (--period 7d|30d --privacy shareable --out F)
 
 `<command> --help` explains each one. The older per-module CLIs
 (python3 -m netwarden.web, ...dns_ingest, ...alerts, ...) keep working unchanged;
@@ -29,9 +30,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import netwarden
-from netwarden import (addon, alerts, backup, brain, demo, discovery, dns_ingest, exposure, headless,
-                       health, i18n, identify, nethealth, pairing, qr, runner, search, settings,
-                       store, traffic_ingest, web)
+from netwarden import (activity, addon, alerts, backup, brain, demo, discovery, dns_ingest, exposure,
+                       headless, health, i18n, identify, nethealth, pairing, qr, report, runner, search,
+                       settings, store, traffic_ingest, web)
 
 log = logging.getLogger("netwarden")
 PROG = "python3 -m netwarden"
@@ -556,6 +557,48 @@ def cmd_restore(argv) -> int:
     return 0
 
 
+# --- report (round 9 X: the shareable home-network report) ----------------------
+
+def cmd_report(argv) -> int:
+    env = brain.load_env()
+    lang = _env_lang(env, argv)
+    ap = _parser("report", lang)
+    ap.add_argument("--db", default=str(store.DEFAULT_DB), help=i18n.t("cli.opt.db", lang))
+    ap.add_argument("--period", default="7d", help=i18n.t("cli.opt.report_period", lang))
+    ap.add_argument("--privacy", default=report.DEFAULTS["privacy"], choices=report.PRIVACY,
+                    help=i18n.t("cli.opt.report_privacy", lang))
+    ap.add_argument("--names", default=report.DEFAULTS["names"], choices=report.NAMES,
+                    help=i18n.t("cli.opt.report_names", lang))
+    ap.add_argument("--people", default=report.DEFAULTS["people"], choices=report.PEOPLE,
+                    help=i18n.t("cli.opt.report_people", lang))
+    ap.add_argument("--format", default=None, choices=report.FORMATS,
+                    help=i18n.t("cli.opt.report_format", lang))
+    ap.add_argument("--out", "-o", default=None, help=i18n.t("cli.opt.report_out", lang))
+    _opt_lang(ap, lang)
+    args = ap.parse_args(argv)
+    lang = i18n.normalize(args.lang or env.get("NETWARDEN_LANG"))
+    fmt = args.format or ("md" if args.out and args.out.lower().endswith(".md") else "html")
+    try:
+        opts = report.options({"period": args.period, "privacy": args.privacy, "names": args.names,
+                               "people": args.people, "format": fmt})
+    except report.BadOption as e:
+        print(i18n.t("err.bad_report_option", lang, option=e.key), file=sys.stderr)
+        return 2
+    db = store.connect(args.db)
+    try:
+        body, _ctype, name = report.generate(db, lang, opts, env=env,
+                                             tz=activity.local_tz(env.get("NETWARDEN_TZ") or None))
+    finally:
+        db.close()
+    if args.out == "-":
+        sys.stdout.write(body.decode("utf-8"))
+        return 0
+    out = Path(args.out) if args.out else Path(name)
+    out.write_bytes(body)
+    print(i18n.t("cli.report.saved", lang, path=out))
+    return 0
+
+
 # --- dispatch ----------------------------------------------------------------
 
 COMMANDS = {
@@ -575,6 +618,7 @@ COMMANDS = {
     "pair": cmd_pair,
     "backup": cmd_backup,
     "restore": cmd_restore,
+    "report": cmd_report,
 }
 
 
@@ -587,7 +631,7 @@ def usage(lang: str) -> str:
 
 
 LANG_COMMANDS = {"run", "web", "alerts", "demo", "status", "prune", "check", "search",
-                 "identify", "health", "pair", "backup", "restore"}   # take --lang
+                 "identify", "health", "pair", "backup", "restore", "report"}   # take --lang
 
 
 def main(argv=None) -> int:

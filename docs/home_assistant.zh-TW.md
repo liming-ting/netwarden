@@ -24,7 +24,8 @@ Pi-hole 讀取每台裝置的 DNS 查詢,再用白話解釋它看到的事情。
 3. 點 **開啟網頁介面**,或側邊欄的 **netwarden**。只有 Home Assistant 管理員看得到這個面板。
 
 附加元件映像檔是 `ghcr.io/liming-ting/netwarden-addon`,支援 amd64、aarch64(64 位元 Raspberry Pi)
-和 armv7。有新版本時,Home Assistant 會像其他附加元件一樣顯示更新。
+和 armv7。有新版本時,Home Assistant 會像其他附加元件一樣顯示更新。(Home Assistant 從
+2025.12 版起不再支援 32 位元系統;armv7 映像檔仍會建置給既有的安裝使用,但沒有實測過。)
 
 ## 選項
 
@@ -37,8 +38,10 @@ Pi-hole 讀取每台裝置的 DNS 查詢,再用白話解釋它看到的事情。
 | `timezone` | `NETWARDEN_TZ` | IANA 時區名稱;留空 = 使用 Home Assistant 的時區 |
 | `dns_source` | `NETWARDEN_DNS_SOURCE` | `adguard` 或 `pihole` |
 | `adguard_url` / `adguard_user` / `adguard_password` | `ADGUARD_URL` / `ADGUARD_USER` / `ADGUARD_PASS` | 只讀取查詢紀錄 |
-| `pihole_url` / `pihole_password` | `PIHOLE_URL` / `PIHOLE_PASSWORD` | Pi-hole v6 |
+| `pihole_url` / `pihole_password` | `PIHOLE_URL` / `PIHOLE_PASSWORD` | Pi-hole v6;建議用應用程式密碼 |
 | `ntopng_url` / `ntopng_user` / `ntopng_password` | `NTOPNG_URL` / `NTOPNG_USER` / `NTOPNG_PASS` | 選用:每台裝置的流量 |
+| `ntopng_token` | `NTOPNG_TOKEN` | 選用;取代 ntopng 的帳號 + 密碼 |
+| `adguard_verify_tls` / `pihole_verify_tls` / `ntopng_verify_tls` | `ADGUARD_VERIFY_TLS` / `PIHOLE_VERIFY_TLS` / `NTOPNG_VERIFY_TLS` | 不設定 = 驗證憑證;只有 `https://` 位址搭配來源自己的自簽憑證時才關閉 |
 | `anthropic_api_key` | `ANTHROPIC_API_KEY` | 選用;只有你在 AI 頁面提問時才會呼叫 |
 | `ai_api_key` | `NETWARDEN_AI_KEY` | 選用;本機 / 私有 OpenAI 相容伺服器的金鑰 |
 | `offline_ai` | `NETWARDEN_OFFLINE_AI` | 永遠不呼叫任何 AI 模型 |

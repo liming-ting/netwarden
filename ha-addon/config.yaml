@@ -44,11 +44,15 @@ schema:
   adguard_url: url?
   adguard_user: str?
   adguard_password: password?
+  adguard_verify_tls: bool?
   pihole_url: url?
   pihole_password: password?
+  pihole_verify_tls: bool?
   ntopng_url: url?
   ntopng_user: str?
   ntopng_password: password?
+  ntopng_token: password?
+  ntopng_verify_tls: bool?
   anthropic_api_key: password?
   ai_api_key: password?
   offline_ai: bool

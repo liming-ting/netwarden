@@ -84,3 +84,56 @@ places.
   study server on :8799 only; both flows have browser checks and tests from Stages X/M
   and nothing in them changed except the place they sit in).
 - No new settings, endpoints or data, so `scripts/demo_seed.py` needed no new story.
+
+## Round 9 U - keyboard first
+
+**Command palette** (`app.js`, "Command palette" section; `tests/js/palette_match_test.js`,
+`tests/test_round9_u.py`). Ctrl+K / Cmd+K or the header search box (also the phone's search
+button). Groups, in order: recent (empty query), devices, pages, people & rooms, services
+and domains (the existing `/api/search`, debounced - no new endpoint), actions, settings,
+"ask the assistant". Rules:
+
+- Matching (`fold()` + `fuzzy()`): NFKD + no accents + lower case + `TS_PAIRS`
+  (Traditional -> Simplified for the characters the UI and demo use). Tiers: substring >
+  every word present > word-start initials (span <= 32), CJK characters count as word
+  starts. Settings match their label and key, never their help text (too much noise).
+- Device haystack `devHay()`: name, label, hostname, vendor, MAC (with and without
+  separators), IPs, owner, room, type. The Devices / Map / person-picker filters use the
+  same `matches()`.
+- Permissions follow the buttons: scan, pair, backup/restore, check, wizard and settings
+  are offered only on this computer (`!S.meta.remote`; scan not on the demo). Settings load
+  lazily on the first palette open (local only).
+- "Mute for 1 hour" = tuning snooze `for: '1h'` per alert kind of that device, skipping
+  kinds that already have a longer rule; one toast, one Undo restores every row. "Pause
+  routine alerts" leaves `tuning.CRITICAL_KINDS` alone.
+- "Ask the assistant" opens the chat with the text pre-filled; it never sends.
+- APG: input `role=combobox` + `aria-activedescendant`; `ul role=listbox` > `li role=group`
+  (labelled) > `li role=option`; `#palcount` announces the result count. Focus returns to
+  where it was BEFORE the chosen entry runs.
+
+**Shortcuts.** Global keydown ignores `isComposing` / keyCode 229 first, then typing
+targets, then single keys if they are off (`ui.shortcuts` = the home default via
+`/api/meta.shortcuts`; `localStorage netwarden.single_keys` = this browser). Ctrl/Cmd+K and
+Ctrl/Cmd+Z always work. `/` = `focusFilter()` (Devices, Map, people picker), else the palette.
+
+**Remembered view.** `VIEW_PAGES` (devices, map, suggestions): each field validated
+(`vStr` / `vOne`), stored under `netwarden.view.v1.<db>` and mirrored into the hash query
+with `history.replaceState` (relative `#/...` only - ingress-safe). A link without a query
+keeps the remembered view; one with a query sets it exactly. Scroll is saved per history
+entry (`history.state.nw` + sessionStorage `netwarden.scroll`, 60 entries) and restored on
+Back / reload until the user scrolls. `<details data-persist>` sections remember open/closed.
+
+**Friction pass** (10 tasks, 1280 + 375 px, both themes, zh-Hant + en; keyboard-only for
+rename, why-this-alert, a kid's phone, change language, undo). Fixed:
+
+- Enter in a drawer field (name, room) saved but dropped focus to the page: now keeps it.
+- Enter in the Devices filter did nothing: opens the only match, else focuses the first row.
+- Two quiet-hours summaries had identical titles: with more than one, each names its night.
+- Languages were only found by their own name: now also by their name in English and in
+  the current language (`Intl.DisplayNames`).
+- The demo's first-run card: the Overview button touched the text (spacing).
+- The palette's "ask" row lost its label on phones under the hint: two-line layout.
+- The shortcut switch sat under the long key list: moved to the top of the sheet.
+
+Left as is: the drawer opens with focus on Close (three Tabs to Name) so a phone keyboard
+does not pop up; the demo's two quiet-hours cards push the phone inbox down (demo story).

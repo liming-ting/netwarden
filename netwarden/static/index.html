@@ -103,7 +103,7 @@
       <a class="brand brand-m" href="#/overview" aria-label="netwarden"><span class="logo" aria-hidden="true"></span><span class="bn">net<b>warden</b></span></a>
       <button type="button" class="searchbtn" id="btnPalette" aria-haspopup="dialog">
         <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
-        <span class="lbl" data-i18n="app.search_open"></span><kbd>/</kbd>
+        <span class="lbl" data-i18n="app.search_open"></span><kbd id="palkbd">Ctrl K</kbd>
       </button>
       <span class="live" id="live" role="status"></span>
       <span class="updated" id="updated" aria-live="off"></span>
@@ -160,11 +160,13 @@
     <div class="pal-in">
       <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
       <input id="palq" type="text" autocomplete="off" spellcheck="false" maxlength="100" role="combobox"
-             aria-expanded="true" aria-controls="pallist" aria-autocomplete="list" data-i18n-placeholder="app.palette_placeholder">
+             aria-expanded="true" aria-controls="pallist" aria-autocomplete="list" aria-haspopup="listbox"
+             data-i18n-placeholder="app.palette_placeholder" data-i18n-aria="app.palette_placeholder">
       <kbd>Esc</kbd>
     </div>
-    <ul id="pallist" class="pal-list" role="listbox"></ul>
+    <ul id="pallist" class="pal-list" role="listbox" data-i18n-aria="app.search_open"></ul>
     <div class="pal-foot" data-i18n="app.palette_hint"></div>
+    <div id="palcount" class="sr" aria-live="polite" aria-atomic="true"></div>
   </div>
 </div>
 

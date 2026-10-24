@@ -27,7 +27,9 @@ Pi-hole.
    administrators see the panel.
 
 The add-on image is `ghcr.io/liming-ting/netwarden-addon` for amd64, aarch64 (64-bit Raspberry Pi)
-and armv7. Updates show up in Home Assistant like any other add-on update.
+and armv7. Updates show up in Home Assistant like any other add-on update. (Home Assistant
+dropped 32-bit systems with release 2025.12; the armv7 image is still built for existing
+installs, but it is untested.)
 
 ## Options
 
@@ -40,8 +42,10 @@ fields are hidden until you click **Show unused optional configuration options**
 | `timezone` | `NETWARDEN_TZ` | IANA name; empty = Home Assistant's time zone |
 | `dns_source` | `NETWARDEN_DNS_SOURCE` | `adguard` or `pihole` |
 | `adguard_url` / `adguard_user` / `adguard_password` | `ADGUARD_URL` / `ADGUARD_USER` / `ADGUARD_PASS` | query log, read-only |
-| `pihole_url` / `pihole_password` | `PIHOLE_URL` / `PIHOLE_PASSWORD` | Pi-hole v6 |
+| `pihole_url` / `pihole_password` | `PIHOLE_URL` / `PIHOLE_PASSWORD` | Pi-hole v6; an app password is best |
 | `ntopng_url` / `ntopng_user` / `ntopng_password` | `NTOPNG_URL` / `NTOPNG_USER` / `NTOPNG_PASS` | optional bytes per device |
+| `ntopng_token` | `NTOPNG_TOKEN` | optional, instead of the ntopng user + password |
+| `adguard_verify_tls` / `pihole_verify_tls` / `ntopng_verify_tls` | `ADGUARD_VERIFY_TLS` / `PIHOLE_VERIFY_TLS` / `NTOPNG_VERIFY_TLS` | leave unset (certificates are verified); off only for an `https://` address with the source's own self-signed certificate |
 | `anthropic_api_key` | `ANTHROPIC_API_KEY` | optional; called only when you ask the AI |
 | `ai_api_key` | `NETWARDEN_AI_KEY` | optional key of a local / private OpenAI-compatible server |
 | `offline_ai` | `NETWARDEN_OFFLINE_AI` | never call any AI model |

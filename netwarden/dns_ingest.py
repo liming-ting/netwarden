@@ -20,6 +20,7 @@ Pure standard library. Credentials come from .env (see scripts/adguard_dev.sh):
     ADGUARD_URL=http://127.0.0.1:3000  ADGUARD_USER=...  ADGUARD_PASS=...
 or, for Pi-hole v6 (docs/pihole.md):
     PIHOLE_URL=http://pi.hole  PIHOLE_PASSWORD=...  [PIHOLE_VERIFY_TLS=0 for self-signed]
+(ADGUARD_VERIFY_TLS=0 likewise for an AdGuard Home with its own self-signed certificate.)
 Both configured -> AdGuard, unless NETWARDEN_DNS_SOURCE=pihole. Either way netwarden
 only READS the query log; it never changes a setting on the DNS server.
 
@@ -32,12 +33,12 @@ from __future__ import annotations
 
 import argparse
 import base64
+import itertools
 import json
 import math
 import os
 import re
 import socket
-import ssl
 import subprocess
 import sys
 import time
@@ -111,7 +112,16 @@ def _text(v, limit: int = MAX_FIELD) -> str | None:
 
 
 def _domain(v) -> str:
-    return (_text(v) or "").rstrip(".").lower()
+    """A queried name, lower case, no trailing dot. An internationalized name is stored in
+    its ASCII (punycode, "xn--") form - what AdGuard's question.name and Pi-hole already
+    send, and what tracker / service lists use - so both sources agree on one spelling."""
+    d = (_text(v) or "").rstrip(".").lower()
+    if d and not d.isascii():
+        try:
+            d = d.encode("idna").decode("ascii")
+        except UnicodeError:   # not a valid IDN (e.g. a label > 63 chars): keep it as sent
+            pass
+    return d
 
 
 def _number(v) -> float | None:
@@ -185,20 +195,29 @@ class Source(Protocol):
 
 
 class AdGuardHome:
-    """AdGuard Home via its HTTP API: GET /control/querylog (newest first, paged)."""
+    """AdGuard Home via its HTTP API (openapi/openapi.yaml, v0.107.x; docs/dev/integrations.md):
+
+        GET /control/querylog?limit=&older_than=   newest first; `oldest` = the next page's
+                                                   older_than (RFC 3339, "" at the end)
+        GET /control/querylog/config               {enabled, anonymize_client_ip, ...}
+                                                   (before v0.107.30: /control/querylog_info)
+
+    Auth = HTTP Basic with an AdGuard Home user (401 without / with wrong credentials);
+    no users configured = no auth. question.name is already ASCII (punycode)."""
     source = "adguard"
     # FilteringReason values that mean "the client did not get a real answer".
     BLOCK_REASONS = {k for k in store.BLOCK_REASONS if k.startswith("Filtered")}
 
     def __init__(self, url: str, user: str = "", password: str = "",
-                 page_size: int = 500, timeout: float = 10):
+                 page_size: int = 500, timeout: float = 10, verify_tls: bool = True):
         self.url = url.rstrip("/")
-        self.page_size = page_size
+        self.page_size = max(1, int(page_size))   # limit=0 returns nothing at all
         self.timeout = timeout
         self.password = password   # only for masking it in errors (health.source_secrets)
         self.auth = ("Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
                      if user else None)
-        self.opener = health.opener()   # never follows a redirect to another host
+        # same-origin redirects only; https verified unless ADGUARD_VERIFY_TLS=0
+        self.opener = health.opener(health.tls_context(verify_tls))
 
     def _get(self, path: str, params: dict) -> dict:
         req = urllib.request.Request(f"{self.url}{path}?{urllib.parse.urlencode(params)}")
@@ -246,7 +265,34 @@ class AdGuardHome:
                              round(float(avg) * 1000, 1) if isinstance(avg, (int, float)) else None,
                              ups)
 
+    def log_config(self) -> dict:
+        """The query log settings ({} if this AdGuard Home has neither endpoint)."""
+        for path in ("/control/querylog/config", "/control/querylog_info"):
+            try:
+                return self._get(path, {})
+            except urllib.error.HTTPError as e:
+                e.close()
+                if e.code not in (404, 405):
+                    raise
+        return {}
+
+    def check_log_enabled(self) -> None:
+        """SourceError(log_off) when the query log is switched off: then AdGuard Home
+        answers every page with an empty list, which would look like a quiet home."""
+        if self.log_config().get("enabled") is False:
+            raise health.SourceError(
+                "log_off", "AdGuard Home's query log is turned off - turn on "
+                "Settings -> General settings -> Enable log")
+
     def events(self, since: str | None) -> Iterator[dict]:
+        yielded = 0
+        for ev in self._pages(since):
+            yielded += 1
+            yield ev
+        if not yielded:   # nothing new: a quiet minute - or a log that is switched off
+            self.check_log_enabled()
+
+    def _pages(self, since: str | None) -> Iterator[dict]:
         older_than = None
         for _page in range(MAX_PAGES):
             params = {"limit": self.page_size}
@@ -270,33 +316,64 @@ class AdGuardHome:
             older_than = nxt
 
 
-class PiHoleError(OSError):
-    """Pi-hole refused us (bad password, 2FA, no free API session, ...). An OSError, so
-    callers treat it like any other "can't reach the source" failure."""
+class PiHoleError(health.SourceError):
+    """Pi-hole refused us (bad password, 2FA, no free API session, v5, ...). An OSError,
+    so callers treat it like any other "can't reach the source" failure; `kind` says
+    which (conntest.ERROR_KINDS)."""
+
+    def __init__(self, message: str, kind: str = "auth"):
+        super().__init__(kind, message)
+
+
+_V5_TOKEN = re.compile(r"[0-9a-f]{64}")   # Pi-hole v5's API token: sha256 hex
+
+
+def pihole_base_url(url: str) -> str:
+    """The Pi-hole's root URL. People paste the web interface address: "http://pi.hole/admin/"
+    and ".../api" both mean "http://pi.hole" (netwarden adds /api/... itself)."""
+    url = url.strip().rstrip("/")
+    for tail in ("/admin", "/api"):
+        if url.lower().endswith(tail):
+            url = url[: -len(tail)].rstrip("/")
+    return url
 
 
 class PiHole:
-    """Pi-hole v6 via its REST API (FTL; docs.pi-hole.net/api, FTL src/api/docs).
+    """Pi-hole v6 via its REST API (FTL src/api/docs/content/specs; docs/dev/integrations.md).
 
         POST   /api/auth {"password"}  -> {"session": {"valid", "sid", "validity", ...}}
-        GET    /api/queries?from=&length=&start=&cursor=   newest first (ORDER BY id DESC)
-        DELETE /api/auth               -> 204, frees the session slot
+        GET    /api/queries?from=&length=&start=&cursor=[&disk=true]   newest first
+        GET    /api/auth/sessions      -> {"sessions": [{id, current_session, user_agent, ...}]}
+        DELETE /api/auth               -> 204, frees the session slot (seat)
+        DELETE /api/auth/session/<id>  -> 204 (only for OUR stale sessions, see below)
 
     The SID goes in the X-FTL-SID header (no CSRF token needed for header auth). One
     session is reused across calls - and across runs of the `run` loop - because
-    Pi-hole only has a few API seats; a 401 (session expired) means log in once more,
-    and close() logs out. An application password works the same as the real one.
+    Pi-hole only has a few API seats (webserver.api.max_sessions, 16 by default); a 401
+    (session expired) means log in once more, and close() logs out. An application
+    password works the same as the real one and is the way in with 2FA on.
     A Pi-hole without a password needs no session at all: an empty PIHOLE_PASSWORD
     skips the login, and a POST /api/auth answered with sid null means the same.
+
+    Seats never pile up: before a re-login the old SID is logged out (best effort), and
+    after every login sessions with OUR User-Agent that have been idle for STALE_S (left
+    behind by a crash or a kill -9, which can't log out) are ended. A live netwarden
+    polls every 60 s, so it is never idle that long; other clients are never touched.
 
     Paging: the first page answers with `cursor` = the newest query id; later pages
     pass that cursor (pins the result set while new queries keep arriving) plus
     start = rows already read. `from` (unix seconds, inclusive) stops at our watermark.
+    FTL keeps only the last 24 h in memory: when our watermark is older than the
+    in-memory log (`earliest_timestamp`), the run reads the on-disk database instead
+    (disk=true) so a day of downtime leaves no gap.
     """
     source = "pihole"
     MAX_PAGE = 10_000          # FTL's API_QUERIES_MAX_ROWS
+    STALE_S = 600              # an idle netwarden session older than this is a leftover
+    MAX_REAP = 16              # stale sessions ended per login, at most
     CACHED = {"CACHE", "CACHE_STALE"}
     PENDING = {"IN_PROGRESS"}   # FTL is still waiting for the upstream answer
+    HIDDEN = "hidden"           # what privacy levels 1 / 2 put in place of a domain
     # reply.type -> DNS rcode, so `status` means the same thing for every source.
     RCODES = {"NXDOMAIN": "NXDOMAIN", "SERVFAIL": "SERVFAIL", "REFUSED": "REFUSED",
               "NOTIMP": "NOTIMP", "IP": "NOERROR", "CNAME": "NOERROR", "DOMAIN": "NOERROR",
@@ -305,16 +382,14 @@ class PiHole:
 
     def __init__(self, url: str, password: str = "", verify_tls: bool = True,
                  page_size: int = 1000, timeout: float = 10):
-        self.url = url.rstrip("/")
+        self.url = pihole_base_url(url)
         self.password = password
         self.page_size = max(1, min(int(page_size), self.MAX_PAGE))
         self.timeout = timeout
         self.sid: str | None = None
         self.logged_in = False   # a session exists (or the Pi-hole told us none is needed)
-        self.ctx = ssl.create_default_context()
-        if not verify_tls:       # PIHOLE_VERIFY_TLS=0: the stock self-signed certificate
-            self.ctx.check_hostname = False
-            self.ctx.verify_mode = ssl.CERT_NONE
+        self.hidden = 0          # rows the privacy level hid from us (last events() run)
+        self.ctx = health.tls_context(verify_tls)   # PIHOLE_VERIFY_TLS=0: self-signed cert
         self.opener = health.opener(self.ctx)   # same-origin redirects only (X-FTL-SID)
 
     # -- HTTP + session --------------------------------------------------------
@@ -332,27 +407,85 @@ class PiHole:
         with self.opener.open(req, timeout=self.timeout) as resp:
             return health.read_source_json(resp, "Pi-hole", "PIHOLE_URL")
 
+    def _not_v6(self, code: int) -> PiHoleError:
+        """/api/auth doesn't exist here: a Pi-hole v5 (its api.php answers) or no Pi-hole."""
+        try:
+            v5 = self._call("GET", "/admin/api.php", {"versions": ""})
+        except (OSError, ValueError):
+            v5 = {}
+        if any(str(k).startswith("core_") for k in v5):
+            return PiHoleError("This is Pi-hole v5 (legacy api.php): netwarden needs Pi-hole v6 "
+                               "- update Pi-hole, then use its web or app password", "version")
+        return PiHoleError(f"PIHOLE_URL is not a Pi-hole v6 API (HTTP {code}) - check the address",
+                           "version")
+
     def login(self) -> None:
         self.sid, self.logged_in = None, False
         try:
             data = self._call("POST", "/api/auth", body={"password": self.password})
         except urllib.error.HTTPError as e:
-            e.close()
+            err = health.http_error_body(e)
+            key = str(_obj(err.get("error")).get("key") or "")
+            msg = str(_obj(err.get("error")).get("message") or "")
+            if e.code == 401 and "2FA" in msg:
+                raise PiHoleError("Pi-hole wants a 2FA code (HTTP 401) - create an app password "
+                                  "and use it as PIHOLE_PASSWORD", "totp") from None
             if e.code == 401:
+                if _V5_TOKEN.fullmatch(self.password or ""):
+                    raise PiHoleError("Pi-hole rejected the password (HTTP 401): this looks like a "
+                                      "v5 API token - Pi-hole v6 needs its web password or an "
+                                      "app password in PIHOLE_PASSWORD", "token_v5") from None
                 raise PiHoleError("Pi-hole rejected the password (HTTP 401) - check PIHOLE_PASSWORD "
                                   "(an application password works too)") from None
+            if e.code == 429 and key == "rate_limiting":
+                raise PiHoleError("Pi-hole is rate-limiting login attempts (HTTP 429) - "
+                                  "check PIHOLE_PASSWORD, then wait a minute", "rate_limited") from None
             if e.code == 429:
-                raise PiHoleError("Pi-hole has no free API session (HTTP 429) - "
-                                  "close other API clients or wait a few minutes") from None
+                raise PiHoleError("Pi-hole has no free API session (HTTP 429, API seats exceeded) - "
+                                  "close other API clients or wait a few minutes", "seats") from None
+            if e.code == 400 and "2FA" in msg:
+                raise PiHoleError("Pi-hole has 2FA turned on (HTTP 400) - use an application "
+                                  "password as PIHOLE_PASSWORD", "totp") from None
             if e.code == 400:
                 raise PiHoleError("Pi-hole refused the login (HTTP 400) - with 2FA enabled, "
-                                  "use an application password as PIHOLE_PASSWORD") from None
+                                  "use an application password as PIHOLE_PASSWORD", "totp") from None
+            if e.code in (404, 405):
+                raise self._not_v6(e.code) from None
             raise
-        session = data.get("session") or {}
+        session = data.get("session")
+        if not isinstance(session, dict):   # a JSON answer, but not FTL's (another web app)
+            raise self._not_v6(200)
         if not session.get("valid"):
             raise PiHoleError("Pi-hole did not accept the login (invalid session)")
-        self.sid = session.get("sid") or None   # None: this Pi-hole has no password
+        sid = session.get("sid")
+        self.sid = sid if isinstance(sid, str) and sid else None   # None: no password set
         self.logged_in = True
+        if self.sid:
+            self._reap_stale()
+
+    def _reap_stale(self) -> None:
+        """End OUR sessions that a crashed / killed run left behind (best effort, never
+        raises): same User-Agent, not this session, idle for STALE_S by Pi-hole's clock."""
+        try:
+            rows = self._call("GET", "/api/auth/sessions").get("sessions")
+            rows = [s for s in rows if isinstance(s, dict)] if isinstance(rows, list) else []
+            mine = [s for s in rows if s.get("current_session") is True]
+            ref = _number(mine[0].get("last_active")) if mine else None
+            if not ref:
+                return
+            ended = 0
+            for s in rows:
+                last = _number(s.get("last_active"))
+                sid = s.get("id")
+                if (s.get("current_session") is True or last is None or ended >= self.MAX_REAP
+                        or not isinstance(sid, int) or isinstance(sid, bool)
+                        or not str(s.get("user_agent") or "").startswith("netwarden/")
+                        or ref - last < self.STALE_S):
+                    continue
+                self._call("DELETE", f"/api/auth/session/{sid}")
+                ended += 1
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass   # an older FTL without the list, or no rights: sessions time out on their own
 
     def close(self) -> None:
         """Log out (frees the API seat). Safe to call twice; never raises."""
@@ -377,11 +510,14 @@ class PiHole:
             return self._call("GET", path, params)
         except urllib.error.HTTPError as e:
             e.close()
+            if e.code == 404:          # no /api at all: a Pi-hole v5, or the wrong address
+                raise self._not_v6(404) from None
             if e.code != 401:
                 raise
         # 401: our session expired (or there never was one) -> log in once, retry once.
         if not self.password:
             raise PiHoleError("Pi-hole requires a password - set PIHOLE_PASSWORD in .env")
+        self.close()     # if that SID is somehow still alive, it must not keep a seat
         self.login()
         return self._call("GET", path, params)
 
@@ -402,12 +538,16 @@ class PiHole:
         elapsed = _number(reply.get("time"))
         elapsed = None if elapsed is None else round(elapsed * 1000, 3)  # seconds -> ms
         reason = store.block_reason(status)
+        domain = _domain(q.get("domain"))
+        if domain == self.HIDDEN:   # privacy level 1 / 2: nothing we could tell anyone
+            self.hidden += 1
+            raise BadItem("hidden by the privacy level")
         return {
             "source": self.source,
             "ts": _epoch_ts(q.get("time")),
             "client_ip": _text(client.get("ip"), 64) or "",
             "client_name": _text(client.get("name")),
-            "domain": _domain(q.get("domain")),
+            "domain": domain,
             "qtype": _text(q.get("type"), 16),
             "status": self.RCODES.get(_text(reply.get("type"), 16) or ""),
             "reason": status or None,
@@ -420,6 +560,16 @@ class PiHole:
         }
 
     def events(self, since: str | None) -> Iterator[dict]:
+        self.hidden = 0
+        yielded = 0
+        for ev in self._pages(since):
+            yielded += 1
+            yield ev
+        if self.hidden and not yielded:
+            raise PiHoleError("Pi-hole's privacy level hides the domains - netwarden needs "
+                              "privacy level 0 (Settings -> Privacy)", "log_off")
+
+    def _pages(self, since: str | None) -> Iterator[dict]:
         params: dict = {"length": self.page_size}
         if since:
             # inclusive and whole seconds: the watermark row comes back and is
@@ -432,6 +582,16 @@ class PiHole:
             rows = page.get("queries") or []
             if not isinstance(rows, list):
                 return
+            if start == 0 and "cursor" in page and page["cursor"] is None and not rows:
+                # FTL answers cursor null only at privacy level 3 ("anonymous mode")
+                raise PiHoleError("Pi-hole's privacy level hides every query (anonymous mode) - "
+                                  "netwarden needs privacy level 0 (Settings -> Privacy)", "log_off")
+            earliest = _number(page.get("earliest_timestamp"))
+            if (start == 0 and "from" in params and "disk" not in params and earliest
+                    and earliest > params["from"] + 60):
+                # our watermark is older than FTL's in-memory day: read the database instead
+                params["disk"] = "true"
+                continue
             for q in rows:
                 ev = _try_normalize(self, q)
                 if ev is None:
@@ -465,13 +625,20 @@ def _flag(value: str | None, default: bool = True) -> bool:
     return str(value).strip().lower() not in ("0", "false", "no", "off")
 
 
-def source_from_env(env: dict[str, str]) -> Source:
-    name = dns_source_name(env)
+def make_source(name: str, env: dict[str, str], timeout: float = 10) -> Source:
+    """The adapter for DNS source `name` ("adguard" | "pihole") from its .env settings -
+    the one place that reads them (ingest, the `run` loop and "Test connection")."""
     if name == "pihole":
         return PiHole(env["PIHOLE_URL"], env.get("PIHOLE_PASSWORD", ""),
-                      verify_tls=_flag(env.get("PIHOLE_VERIFY_TLS")))
-    if name == "adguard":
-        return AdGuardHome(env["ADGUARD_URL"], env.get("ADGUARD_USER", ""), env.get("ADGUARD_PASS", ""))
+                      verify_tls=_flag(env.get("PIHOLE_VERIFY_TLS")), timeout=timeout)
+    return AdGuardHome(env["ADGUARD_URL"], env.get("ADGUARD_USER", ""), env.get("ADGUARD_PASS", ""),
+                       timeout=timeout, verify_tls=_flag(env.get("ADGUARD_VERIFY_TLS")))
+
+
+def source_from_env(env: dict[str, str]) -> Source:
+    name = dns_source_name(env)
+    if name:
+        return make_source(name, env)
     raise SystemExit(i18n.t("status.hint.dns_off", i18n.normalize(env.get("NETWARDEN_LANG"))))
 
 
@@ -574,10 +741,19 @@ def _age_s(ts: str, newest: str) -> float:
     return (datetime.strptime(newest, TS_FMT) - datetime.strptime(ts, TS_FMT)).total_seconds()
 
 
+MAX_EVENTS_PER_RUN = 100_000   # newest first: a first run on a huge log (or a long
+                               # outage) keeps the most recent ones, memory stays bounded
+
+
 def ingest(db, src: Source) -> dict:
     """Pull everything new from `src` into the store. Returns a small stats dict."""
     since = store.get_watermark(db, src.source)
-    events = list(src.events(since))
+    gen = src.events(since)
+    try:
+        events = list(itertools.islice(gen, MAX_EVENTS_PER_RUN))
+    finally:
+        if hasattr(gen, "close"):   # a generator stopped at the cap: end its paging now
+            gen.close()
     fetched = len(events)
     newest = max((e["ts"] for e in events), default=None)
     # A query still being answered (Pi-hole IN_PROGRESS) would be stored with that status
@@ -606,6 +782,7 @@ def ingest(db, src: Source) -> dict:
     relinked = store.link_unattributed(db, att.ip_mac, since=window)
     return {
         "fetched": fetched,
+        "capped": fetched >= MAX_EVENTS_PER_RUN,
         "held": len(held),
         "inserted": inserted,
         "new_devices": new_devices,

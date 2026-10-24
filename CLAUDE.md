@@ -47,45 +47,40 @@ netwarden/
   bedtime.py        notify-only rules (owner|mac, nights, window may cross midnight, min min);
                     hits/alerts/preview; suppress_night() hides unusual_hours a rule covers
   weekly.py         this week vs 7 d earlier, highlights(); family_report.py /report/weekly (printable)
+  report.py         round 9 X (docs/report.md): build() -> {meta, sections} -> render_html|md; privacy full|
+                    shareable|minimal, Scrubber.deep() over the FINISHED doc (redact + any IP/domain -> •••);
+                    GET /api/report (full = admin), CLI `report`, page #/report; the file: no JS, no external refs
   runner.py         `run` loops (thread + conn, backoff): dns 60 s | traffic 30 s | discovery 15 min | health
                     60 s | prune daily; plan(env); log 1 MB x 3; warm() (never the LLM); Warmer keep-warm 20 s
   cache.py          memo(db, name, args, compute): per DB, fingerprint of tables read (+ notes), TTL 30 s,
                     single-flight, copies; never ":memory:"; batch() = 1 fingerprint/request; stale 90 s
   health.py         status(); sanitize_error() (userinfo, auth, sk-, sid=/token=/key=, given +
                     URL-encoded secrets); opener() = same-origin-redirect urllib for sources
-  offline_ai.py     OfflineProvider.answer(db, snap, lang, question, focus): localized summary
-                    from SECTIONS [(fn(ctx) -> lines, notable)] - EXTEND with new signals
+  offline_ai.py     OfflineProvider.answer(db, snap, lang, question, focus): SECTIONS [(fn(ctx) -> lines, notable)] - EXTEND
   privacy.py        TRACKERS (~195 + data/trackers_custom.txt) -> grade A-F (unblocked tracker
                     share <3/10/20/40%), worst(), block_rules() (AdGuard ||d^ + Pi-hole)
   visibility.py     DNS blind spots: DoH/DoT bootstrap + Firefox canary; quiet (>6 h); never (7 d)
-  exposure.py       OPT-IN TCP-connect check of FIXED PORTS (0.8 s, sends nothing), private
-                    inventory IPs only; demo DB -> DemoRefused; start_job()/job_status()
+  exposure.py       OPT-IN TCP-connect of FIXED PORTS (0.8 s, sends nothing), private inventory IPs; demo -> DemoRefused
   devicetype.py     rule votes (hostname/vendor/services/traffic/self/randomized) -> TYPES key
                     + confidence + reason{key, params}; user override (device_profiles) wins
   settings.py       typed REGISTRY (key/type/default/env/validator/group/secret/admin);
                     effective = env > DB `settings` table > default; describe/update/apply;
                     destination(url) -> local|lan|cloud|none (names never resolved)
-  localai.py        OpenAICompatibleProvider (urllib; /chat/completions SSE + JSON fallback,
-                    /models; 5 s connect / 120 s read; no proxy for local/LAN); check_connection
+  localai.py        OpenAICompatibleProvider (/chat/completions SSE + JSON fallback, /models; 5 s / 120 s; no proxy LAN)
   redact.py         Redactor: names/hostnames/owners/rooms/MACs/IPs <-> [D3]/[P1]/[R2]/[M3]/
                     [IP3] (prefix-trie regex); unredact_stream (split tokens); RedactingProvider
   activity.py       local tz (NETWARDEN_TZ > TZ > /etc/localtime > offset); 7x24 grid, typical
                     hours, night_alerts() (conservative; ALWAYS_ON types skipped; >=3 days)
   search.py         search(q); timeline.py per-device; export.py devices_csv (BOM, safe) + report_md
-  demo.py           deterministic synthetic home (meta demo=1); refuses (NotADemoDB) a DB with
-                    real data; never over labels/acks; profiles + Q tuning/quiet seeded once
-  discovery.py      LAN sweep (ping + TCP-knock -> ARP), OUI vendors (download OPT-IN `scan
-                    --update-vendors`); unknown/randomized vendor = ""; reverse DNS
+  demo.py           synthetic home (meta demo=1); NotADemoDB on real data; never over labels/acks; seeds once
+  discovery.py      sweep (ping + TCP-knock -> ARP), OUI vendors (OPT-IN `scan --update-vendors`; unknown = ""), PTR
   dns_ingest.py     Source adapters -> normalized DNS events; AdGuardHome (/control/querylog,
                     paged, watermark); PiHole v6; client IP -> MAC (devices, own IPs, ARP)
   traffic_ingest.py OPTIONAL bytes: NtopngSource (REST v2 /lua/rest/v2/get/host/active.lua,
                     local hosts, paged) -> cumulative per-host counters; IP -> MAC via store
-  store.py          SQLite (WAL, _migrate()): devices, dns_events, traffic_samples, meta, ...;
-                    user data device_labels + device_profiles (type/owner/room) + acks
-  i18n.py           languages from locales/<code>.json (ALL strings + "_meta"; 12 langs),
-                    normalize() codes/legacy/BCP-47, llm_language(), t() w/ English fallback
-  services.py       domain -> (service id, category key), longest-suffix match; brands are
-                    ids as-is, generic names are "svc.<key>[|brand]" localized by lang
+  store.py          SQLite (WAL, _migrate()); user data = device_labels + device_profiles (type/owner/room) + acks
+  i18n.py           locales/<code>.json (ALL strings + "_meta"; 12), normalize() BCP-47, t() w/ English fallback
+  services.py       domain -> (service id, category), longest suffix; generic names "svc.<key>[|brand]" localized
   threatintel.py    "malicious"/"high-risk": curated list + opt-in feed (`--update "URL"`, NO default: URLhaus
                     needs a personal Auth-Key in the URL -> URL = secret, never printed/stored; FeedError kinds)
   brain.py          snapshot() (what the LLM reads); urllib AnthropicProvider (.complete/.stream/
@@ -103,22 +98,23 @@ netwarden/
                     wslnet.py: /proc/version -> Hyper-V firewall PowerShell lines (SHOWN, never run)
   dashboard.py      inventory(): snapshot + EVERY devices row, online (30 min), new, randomized
   live.py since.py  Stage T: ONE change detector per DB -> /api/stream (SSE); /api/since banner
-  static/           index.html + app.css + app.js (the SPA, no build) + map.js (pure layout). E1
+  static/           index.html + app.css + app.js (the SPA, no build) + map.js (pure layout) + demo.js (W). E1
 scripts/  start.sh; start_windows.cmd (CRLF!) / start_demo_windows.cmd (:8788); adguard_dev.sh;
-          dns_traffic.py; demo_seed.py; perf_db.py build|bench [--warm]|all (/tmp/nw_perf.db)
+          dns_traffic.py; demo_seed.py; perf_db.py build|bench [--warm]|all (/tmp/nw_perf.db);
+          build_static_demo.py --out DIR [--quick] [--langs en,..] [--site-url] (W: GitHub Pages live demo)
 docs/     USER docs (English + .zh-TW where present): install, home_assistant, bandwidth (ntopng), pihole,
           private_ai (Ollama/LM Studio, redaction, settings API), lan (M), identification (N), family (F),
-          health (H), people (P); images/ = README screenshots (demo data only, 127.0.0.1:8799)
+          health (H), people (P), report (X); images/ = README screenshots (demo data only, 127.0.0.1:8799)
 docs/dev/ CONTRIBUTOR notes: stages (D1/D2/E2/F), stagex (X), stage_t (T), stagev3 (V3), stageq (Q), ai_tools (A),
-          usability (U), accessibility (G), hardening (K), ha_addon (H), bandwidth_investigation (why ntopng)
+          usability (U), accessibility (G), hardening (K), ha_addon (H), static_demo (W), bandwidth_investigation (why ntopng)
 root      README.md + README.zh-TW.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, CHANGELOG, THIRD_PARTY_NOTICES;
-          .github/ (ci.yml, docker.yml, issue/PR templates, dependabot); docs in English + zh-Hant ONLY
+          .github/ (ci.yml, docker.yml, pages.yml = manual live demo, issue/PR templates, dependabot); docs in English + zh-Hant ONLY
 ha-addon/ config.yaml DOCS/README/CHANGELOG translations/en.yaml icon+logo.png; repository.yaml at the root (one repo)
 tests/    unittest (fake providers/servers on ephemeral 127.0.0.1); js/map_layout_test.js (node)
 ```
 
-**DNS sources** (`dns_ingest.dns_source_name`): AdGuard, or Pi-hole v6 (`PIHOLE_*`); both -> AdGuard unless
-`NETWARDEN_DNS_SOURCE=pihole`. PiHole: one X-FTL-SID session, re-auth once on 401. Only the SELECTED source is
+**DNS sources** (`dns_source_name`, `make_source`): AdGuard, or Pi-hole v6; both -> AdGuard unless `NETWARDEN_DNS_SOURCE=pihole`.
+Sessions, `SourceError(kind)` -> `conntest.ERROR_KINDS`, `*_VERIFY_TLS`: docs/dev/integrations.md (round 9 V). Only the SELECTED source is
 "configured". `blocked` 0/1 + nullable `block_reason`. Devices keyed by **MAC**; events/samples keep raw IP *and* MAC
 at ingest time. Traffic samples are **cumulative** (decrease = reset). The API key never reaches the browser.
 
@@ -142,6 +138,10 @@ translate (keep `{placeholders}`), set `_meta`; `python3 -m netwarden.i18n [--ch
 re-checked every 2 s; restart after editing locales/), CSP `script-src 'self'`.
 - **Navigation (Stage U, docs/dev/usability.md):** `GROUPS` = 7 places with sub-tabs (`subTabs()`); every page keeps its
   own route - a NEW page = add it to a place in GROUPS + `GO_KEYS`. Keys 1-7; phone bar = NAV_PRIMARY + More.
+- **Keyboard first (round 9 U, usability.md):** palette = `paletteItems()` (fold()/fuzzy(): case, accents, width, Trad/Simp
+  `TS_PAIRS`; node tests/js/palette_match_test.js); local-only actions behind `!S.meta.remote`; "ask" pre-fills only.
+  Keys ignore IME (`isComposing`/229) + typing; single keys off = `ui.shortcuts` (/api/meta) or `netwarden.single_keys`.
+  View state: `VIEW_PAGES` (validated) -> `netwarden.view.v1.<db>` + hash query (relative `#/` only); scroll per history entry.
 - app.js: `html` tag escapes every value; keyed `morph()`; drawers `#/device/<mac>|service/<id>|domain/<d>`; Undo + Ctrl/Cmd+Z.
 - LLM ONLY via `chat()`; "Ask AI about device" pre-fills, never sends. Two `innerHTML` writes
   total (morph template, escaped lang options) - test-enforced. Chat = SSE, Stop closes upstream.
@@ -190,12 +190,13 @@ deploy/*.yaml, scripts/install_linux.sh (`--root` for tests), .github/workflows/
 options -> env (`addon.OPTION_ENV`). `Handler.ingress_proxy` (172.30.32.2; `run` in add-on mode / tests ONLY, never a setting):
 that PEER = HA admin; X-Ingress-Path/X-Forwarded-* read from it only. URLs are base-aware (`__BASE__`/`base=`, `url()` in app.js,
 relative manifest/css, sw.js scope): NEVER add a root-absolute URL to static/. Tests: tests/ingress_proxy.py.
+**Static demo (round 9 W)** - docs/dev/static_demo.md: `DEMO` in app.js ONLY with data-static-demo + static/demo.js (`NWDemo.file` = builder
+`static_name`, fixture-pinned); a NEW GET the page makes = add it to the builder (`PAGES`/`DEVICE_GETS`) or it 404s there; DEMO never POSTs.
 
 ## Dev environment
 
 - Python >= 3.11 (CI: 3.11-3.15 on ubuntu-latest, `.github/workflows/ci.yml`); Linux, macOS or WSL2. Batch files CRLF.
-- **Machine-specific notes**: `CLAUDE.local.md` (gitignored) - read it first if it exists; `launch/` = internal notes
-  (release_checklist.md, exec_files.txt = the git +x list, repo_meta.json).
+- `CLAUDE.local.md` (gitignored, machine notes): read it first. `launch/` = internal (release_checklist.md, exec_files.txt = +x list).
 - **Never read, print or modify `.env`** (ANTHROPIC_*, NETWARDEN_*, ...); code only checks presence. No sudo / system
   installs. Don't leave servers running. Never commit real MAC/IP addresses, hostnames, router models, usernames,
   home paths or emails: examples use `192.168.1.x`, `aa:bb:cc:..`, the demo home (tests/test_round6_o.py scans for leaks).
@@ -205,43 +206,33 @@ relative manifest/css, sw.js scope): NEVER add a root-absolute URL to static/. T
 ```bash
 python3 -m netwarden run                       # THE command: dashboard :8787 + loops
 python3 -m netwarden run --demo --offline-ai; bash scripts/start.sh [--demo]  # demo home, no loops; AdGuard + run
-python3 -m netwarden status [--json] | demo | prune --days 30 --vacuum   # health; reseed demo
-python3 -m netwarden scan | ingest [--watch S] | traffic [--watch S] | alerts [--lang] [--json]
-python3 -m netwarden check --mac <mac> | --all; search tiktok [--json]; identify --db /tmp/x.db (counts only)
-python3 -m netwarden health [--json] [--rebuild DAYS]   # router vs ISP verdict + outage log; CLI default lang zh-Hant
-python3 -m netwarden run --lan; python3 -m netwarden pair [--local] [--admin] [--list|--revoke ID]  # phone
+python3 -m netwarden status [--json] | demo | prune --days 30 --vacuum | health [--json] [--rebuild DAYS]  # CLI lang zh-Hant
+python3 -m netwarden scan | ingest|traffic [--watch S] | alerts [--lang] [--json] | check --mac <mac>|--all | search tiktok | report
+python3 -m netwarden run --lan; pair [--local] [--admin] [--list|--revoke ID]; backup [-o F] | restore F [--mode merge|replace] [--dry-run]
 NETWARDEN_HEADLESS=1 NETWARDEN_HOST=0.0.0.0|<lan-ip> python3 -m netwarden run   # container mode; --version
-python3 -m netwarden backup [-o F] | restore F [--mode merge|replace] [--dry-run] [--yes]
 bash scripts/adguard_dev.sh start; python3 scripts/dns_traffic.py   # DEV AdGuard (DNS :5354, API :3000); never for users
-python3 -m netwarden.web --db data/demo.db; python3 -m netwarden.alerts --db data/demo.db  # must work
-python3 scripts/perf_db.py all | bench --warm; python3 scripts/soak.py --minutes 20 --port 8799   # perf; soak (exit 1)
-python3 -m unittest discover -s tests          # 1163 tests, all must pass (+ node tests/js/*.js)
+python3 -m netwarden.web --db data/demo.db; python3 -m netwarden.alerts --db data/demo.db  # must work; perf_db.py / soak.py: perf
+python3 -m unittest discover -s tests          # 1282 tests, all must pass (+ node tests/js/*.js)
 ```
-Windows: `scripts\start_windows.cmd` (:8787) / `start_demo_windows.cmd` (:8788). Manual checks: own `--offline-ai` server on
-127.0.0.1:8799 on a COPY of the demo DB (sqlite3 `.backup` to /tmp); never touch a dashboard someone else is using.
+Windows: `scripts\start_windows.cmd` (:8787) / `start_demo_windows.cmd` (:8788). Manual checks: own `--offline-ai` server on 127.0.0.1:8799, COPY of the demo DB.
 
 ## Status & next steps
 
-**Done:** MVP, i18n, demo; C, P (Pi-hole), D1, D2, E1/E2, V, L, N, F, H, M, X, review fixes 1/2, V3, V4, P, Q, A, T,
-review fixes 4, U, G, K, review fixes 5; round 6: D (Docker, headless admin claim, Linux install, container CI),
-H (HA add-on + ingress), O (open-source tidy), P (launch drafts, launch/), E (newcomer end-to-end, test_round6_e.py:
-Anthropic `THINKING_HEADROOM`, chat note `empty`), review fixes. Round 7 L (test_round7_l.py): THIRD_PARTY_NOTICES
-cites sources; sprite icons are OWN drawings (never icon-set paths); third-party code only in netwarden/vendor/;
-downloaded data (manuf, threat feed) never enters the tree/wheel/image. Round 7 C + fixes (docs/dev/ai_cost.md,
-test_round7_c.py / _fix.py): prompt caching (never a breakpoint on the snapshot; never edit tool defs per request),
-`ai_usage` (local), settings `ai.monthly_budget|budget_warn|price_*`, SSE `usage|budget`, `GET /api/ai/usage`; `usage.Guard`
-before EVERY tool round, JSON AI endpoints 409 (`brain.BudgetNeeded`); prices: re-check + bump PRICES_CHECKED. Round 8 R (test_round8_r.py): GitHub liming-ting/netwarden, images ghcr.io/liming-ting/netwarden + netwarden-addon (lower case);
-AGPL-3.0-or-later (PEP 639 pyproject; LICENSE = verbatim text, hash-pinned: NEVER edit it, no per-file headers);
-`netwarden.LICENSE` / `SOURCE_URL` / `COPYRIGHT` = ONE source (Settings About card, `--version` lines 2-3 - line 1 is
-fixed, /api/meta `license|source_url|copyright`); .gitattributes (LF; .cmd/.bat CRLF); CI = 3.11 + 3.15 on push/PR, full
-matrix on v* tags / manual, images pushed ONLY from v* tags after docker.yml `smoke` + `tests`. Owner LAN values are
-read from CLAUDE.local.md at test time (test_round6_o) - never write them into a test. **CI1** (test_ci1.py): suite under TZ=UTC
-(3.11) + Asia/Taipei, job `tz` = time-sensitive modules in LA + Auckland (`scripts/dev/tz_sweep.sh`); demo stories: one RNG per
-LOCAL day (`demo._day_rng`). **Next:** v0.1.0 (launch/release_checklist.md). Later: block_reason breakdown; HTTPS.
+**Done:** MVP, i18n, demo; stages C P D1 D2 E1/E2 V L N F H M X V3 V4 Q A T U G K + review fixes 1-5; round 6 D/H/O/P/E (Docker +
+headless admin claim, HA add-on, open-source tidy, launch/, newcomer: `THINKING_HEADROOM`, chat note `empty`). Round 7 L (test_round7_l.py):
+THIRD_PARTY_NOTICES cites sources; sprite icons OWN drawings; third-party code only in netwarden/vendor/; downloaded data (manuf, threat
+feed) never in tree/wheel/image. Round 7 C (docs/dev/ai_cost.md): prompt caching (no breakpoint on the snapshot; tool defs never edited per
+request), `ai.monthly_budget|budget_warn|price_*`, SSE `usage|budget`; `usage.Guard` before EVERY tool round, JSON AI endpoints 409
+(`brain.BudgetNeeded`); prices: re-check + bump PRICES_CHECKED. Round 8 R (test_round8_r.py): liming-ting/netwarden,
+ghcr.io/liming-ting/netwarden + netwarden-addon (lower case); AGPL-3.0-or-later (LICENSE verbatim + hash-pinned: NEVER edit, no per-file headers);
+`netwarden.LICENSE|SOURCE_URL|COPYRIGHT` = ONE source; .gitattributes (LF; .cmd/.bat CRLF); images ONLY from v* tags after `smoke` +
+`tests`. Owner LAN values: read from CLAUDE.local.md at test time (test_round6_o). **CI1** (test_ci1.py): TZ=UTC + Asia/Taipei, job `tz`
+(`scripts/dev/tz_sweep.sh`); demo: one RNG per LOCAL day. Round 9 V (integrations), U (keyboard), X (report), W (static demo) + review
+fixes (palette = real modal: `.app`/drawer/chat inert while open; report "keep names" still masked): test_round9_*.py.
+**Next:** v0.1.0 (launch/release_checklist.md; live demo = step 16). Later: block_reason breakdown; HTTPS.
 
 ## Conventions
-- stdlib only; match the plain, commented style of `discovery.py` / `dns_ingest.py`.
-- New data sources = adapters like `dns_ingest.Source` / `TrafficSource`; unconfigured ones change nothing.
+- stdlib only; plain, commented style of `discovery.py` / `dns_ingest.py`; new sources = `dns_ingest.Source`-like adapters.
 - Tests never call the real LLM or network (fake providers, ephemeral 127.0.0.1). Must pass on a fresh copy, no `.env`, in ANY zone
   at ANY hour (tz_sweep.sh; `.env` NETWARDEN_TZ beats TZ); zone-specific expectations under `tests/tzkit.pinned_tz`; pin demo
   clocks (`demo.build(path, now=)`); weekday stories assert both branches.

@@ -49,7 +49,7 @@ import netwarden
 from netwarden import (activity, ai_intents, alerts, backup, bedtime, brain, cache, conntest, dashboard,
                        devicetype, export, exposure, family_report, firstrun, health, hygiene,
                        i18n, identify, inbox, live, localai, naming, nethealth, notify, pairing,
-                       people, presence, privacy, qr, runner, score, screentime, search,
+                       people, presence, privacy, qr, report, runner, score, screentime, search,
                        services, settings, since, store, suggestions, threatintel, timeline,
                        tuning, upnp, usage, visibility, weekly, wslnet)
 
@@ -61,7 +61,7 @@ STATIC_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=
                 ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
                 ".png": "image/png", ".webmanifest": "application/manifest+json"}
 ASSETS = ("app.css", "app.js", "map.js", "report.css", "report.js", "pair.js", "offline.js",
-          "sw.js")   # cache-busted via ?v=<hash>
+          "sw.js", "demo.js")   # cache-busted via ?v=<hash> (demo.js: the static demo only)
 VERSION_MARK = b"__V__"
 # Everything comes from this origin; inline style attributes are used for computed
 # colors/sizes (heatmap, bars), never inline scripts.
@@ -923,6 +923,8 @@ class Handler(BaseHTTPRequestHandler):
                 # opaque per-DB id: the page keeps its chat / notified state per database
                 "db_id": hashlib.sha256(str(Path(self.db_path).resolve()).encode()).hexdigest()[:12],
                 "default_lang": self._lang(),
+                # round 9 U: single-key shortcuts on by default (each browser may override)
+                "shortcuts": bool(settings.get(db, self.env, "ui.shortcuts")),
                 "languages": [{"code": c, "name": n} for c, n, _l in i18n.LANGS],
                 "browser_lang": i18n.from_accept_language(accept),
                 # Stage G: the zone hours / days are counted in, so a browser in another
@@ -953,6 +955,8 @@ class Handler(BaseHTTPRequestHandler):
             db = self._db()
             self._download(export.report_md(db, lang, hours=self.hours).encode("utf-8"),
                            "text/markdown; charset=utf-8", export.filename("report", "md"))
+        elif path == "/api/report":
+            self._report(query, lang)
         elif path == "/api/ai/questions":
             # Stage A: 4-6 suggested questions built from this home's data (no LLM call)
             mac = ((query.get("mac") or [""])[0] or "").strip()[:64] or None
@@ -972,6 +976,33 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, self._settings_body(db, lang))
         else:
             self._error(404, "not_found", lang)
+
+    REPORT_ARGS = ("period", "privacy", "names", "people", "format")
+
+    def _report(self, query, lang: str):
+        """GET /api/report?period=7|30&privacy=full|shareable|minimal&names=&people=
+        &format=html|md[&inline=1]: the shareable home report (report.py) as one file.
+        A paired phone / viewer may take shareable and minimal; full (MAC / IP addresses,
+        names, domains) needs an admin (this computer or an admin session)."""
+        try:
+            opts = report.options({k: (query.get(k) or [""])[0][:16] for k in self.REPORT_ARGS})
+        except report.BadOption as e:
+            self._json(400, {"error": i18n.t("err.bad_report_option", lang, option=e.key)})
+            return
+        if opts["privacy"] == "full" and not self.admin:
+            self._error(403, "report_full_admin", lang)
+            return
+        body, ctype, name = report.generate(self._db(), lang, opts, env=self.env, tz=self._tz())
+        if (query.get("inline") or [""])[0] == "1":   # the Report page's Preview (a new tab)
+            self.send_response(200)
+            self.send_header("content-type", ctype if opts["format"] == "html" else "text/plain; charset=utf-8")
+            self.send_header("content-disposition", f'inline; filename="{name}"')
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self._download(body, ctype, name)
 
     def _settings_body(self, db, lang: str) -> dict:
         """GET /api/settings: the registry described, the AI in use, which sources are

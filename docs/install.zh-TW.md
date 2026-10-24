@@ -15,6 +15,46 @@ netwarden 是一支 Python 程式(只用標準函式庫,沒有任何執行期相
 
 v0.1.0 的實際限制:在 WSL2 或 Docker Desktop 下(它們跑在虛擬機裡),裝置探索只看得到很少或完全看不到裝置;裝置名稱取決於裝置自己廣播了什麼;AI 部分需要 API 金鑰或本機模型(沒有的話會用離線的規則式摘要);英文與繁體中文以外的翻譯是機器輔助的。這個專案大量借助 AI 開發,並有一套大型自動化測試。
 
+## 資料來源:版本與設定
+
+netwarden 需要**一個**會記錄每台裝置查詢的 DNS 過濾器;ntopng 可有可無。下表的「實測」
+指在真實安裝上測過;「文件」指只對照目前官方 API 文件與原始碼,並在測試套件中用模擬伺服器驗證
+(細節:[dev/integrations.md](dev/integrations.md),英文)。
+
+| 來源 | 支援 | 怎麼驗證的 |
+|---|---|---|
+| AdGuard Home | v0.107.x(v0.107.0 以上) | 用 v0.107.79 **實測**;較新的 v0.107 版本對照文件 |
+| Pi-hole | 只支援 v6(REST API) | 文件 + 模擬伺服器;還沒在真正的 Pi-hole 上測過。遇到 v5 會辨識出來並說明,但不會讀取 |
+| ntopng(選用,每台裝置的流量) | REST API v2;用到的那一個端點在文件中沒有標示 Pro / Enterprise,所以社群版應該就夠 | 只有文件 + 模擬伺服器 |
+| Home Assistant 附加元件 | 目前的 Supervisor | 靜態檢查 + CI;還沒裝在真正的 Home Assistant 上 |
+
+各自需要的設定:
+
+- **AdGuard Home:** `ADGUARD_URL`(網頁介面的位址,例如 `http://192.168.1.2:80` 或
+  `:3000`),再加上 `ADGUARD_USER` / `ADGUARD_PASS`,也就是你在 AdGuard Home 設定精靈中建立的
+  帳號(AdGuard Home 的每個帳號都能讀 API)。**查詢紀錄必須開著**(Settings → General
+  settings → Enable log)。同一頁的「Anonymize client IP」請**關掉**,否則每台裝置看起來都一樣。
+  裝置名稱:在 Settings → Client settings 幫裝置命名,或讓 AdGuard Home 自己學(DHCP、
+  `/etc/hosts`、反查 DNS),netwarden 會把它們當作提示。
+- **Pi-hole v6:** `PIHOLE_URL` + `PIHOLE_PASSWORD`,最好用**應用程式密碼**(開了 2FA 時一定要用);
+  隱私等級 0。詳見 [pihole.zh-TW.md](pihole.zh-TW.md)。
+- **ntopng:** `NTOPNG_URL` + `NTOPNG_USER` / `NTOPNG_PASS`(或 `NTOPNG_TOKEN`),選填
+  `NTOPNG_IFID`。詳見 [bandwidth.zh-TW.md](bandwidth.zh-TW.md)。
+- **HTTPS:** 預設會驗證憑證。來源用的是自己的自簽憑證時,在區網最好改用 `http://`,或針對該來源
+  明確關閉檢查:`ADGUARD_VERIFY_TLS=0`、`PIHOLE_VERIFY_TLS=0` 或 `NTOPNG_VERIFY_TLS=0`。
+
+儀表板的 **設定 → 測試連線** 和 `python3 -m netwarden status` 會用白話說明問題:
+
+| 訊息 | 怎麼處理 |
+|---|---|
+| 連線被拒 / 連不到 | 來源沒在執行,或位址(`*_URL`)錯了。 |
+| 登入被拒 | 設定裡的帳號 / 密碼 / 權杖不對。 |
+| 有回應,但內容不如預期 | 位址指到別的網頁(例如登入頁),請檢查網址與連接埠。 |
+| HTTPS 憑證不受信任 | 自簽憑證:改用 `http://`,或設定 `*_VERIFY_TLS=0`。 |
+| 連得上,但查詢紀錄已關閉或被隱藏 | 開啟查詢紀錄(AdGuard Home),隱私等級設為 0(Pi-hole)。 |
+| 這不是 Pi-hole v6 的 API / 看起來是 v5 的權杖 | 不支援 Pi-hole v5;請升級到 v6,改用網頁密碼或應用程式密碼。 |
+| Pi-hole 已沒有空的 API 會話 / 登入嘗試太多次 | 關掉其他 API 用戶端、修正密碼,等一分鐘。 |
+
 ## Docker
 
 Linux 主機,使用 host 網路(裝置探索需要:ARP 表、ping、mDNS/SSDP、UPnP)。

@@ -22,6 +22,50 @@ an API key or a local model (without one you get an offline rule-based summary);
 translations other than English and Traditional Chinese are machine-assisted. The project
 was built with heavy AI assistance and is covered by a large automated test suite.
 
+## Data sources: versions and settings
+
+netwarden needs **one** DNS filter that logs queries per device; ntopng is optional.
+"Tested" below means a real installation; "docs" means checked against the current
+official API documentation and source code with fake servers in the test suite only
+(details: [dev/integrations.md](dev/integrations.md)).
+
+| source | supported | how it was verified |
+|---|---|---|
+| AdGuard Home | v0.107.x (v0.107.0 or newer) | **tested** with v0.107.79; newer v0.107 releases against the docs |
+| Pi-hole | v6 only (REST API) | docs + fake servers; not yet tested on a real Pi-hole. v5 is recognized and explained, not read |
+| ntopng (optional, bytes per device) | REST API v2; the one endpoint used is not marked Pro / Enterprise in the docs, so Community should do | docs + fake servers only |
+| Home Assistant add-on | current Supervisor | static checks + CI; not yet installed on a real Home Assistant |
+
+What each one needs:
+
+- **AdGuard Home:** `ADGUARD_URL` (its web interface address, e.g. `http://192.168.1.2:80`
+  or `:3000`), plus `ADGUARD_USER` / `ADGUARD_PASS` - the user you created in AdGuard Home's
+  setup wizard (every AdGuard Home user can read the API). The **query log must be on**
+  (Settings -> General settings -> Enable log). Turn **off** "Anonymize client IP" there,
+  or every device looks the same. Device names: name your devices under Settings ->
+  Client settings, or let AdGuard Home learn them (DHCP, `/etc/hosts`, reverse DNS) -
+  netwarden picks them up as hints.
+- **Pi-hole v6:** `PIHOLE_URL` + `PIHOLE_PASSWORD` - preferably an **app password**
+  (required with 2FA); privacy level 0. See [pihole.md](pihole.md).
+- **ntopng:** `NTOPNG_URL` + `NTOPNG_USER` / `NTOPNG_PASS` (or `NTOPNG_TOKEN`), optional
+  `NTOPNG_IFID`. See [bandwidth.md](bandwidth.md).
+- **HTTPS:** certificates are verified by default. For a source that uses its own
+  self-signed certificate, prefer `http://` on your LAN, or opt out per source with
+  `ADGUARD_VERIFY_TLS=0`, `PIHOLE_VERIFY_TLS=0` or `NTOPNG_VERIFY_TLS=0`.
+
+**Settings -> Test connection** in the dashboard and `python3 -m netwarden status` explain
+problems in plain words:
+
+| message | fix |
+|---|---|
+| Connection refused / Can't reach it | The source isn't running or the address is wrong (`*_URL`). |
+| Login refused | Wrong user / password / token in the settings. |
+| It answered, but not as expected | The address points at a different web page (e.g. a login page) - check the URL and port. |
+| The HTTPS certificate isn't trusted | Self-signed certificate: use `http://`, or `*_VERIFY_TLS=0`. |
+| Connected, but the query log is off or hidden | Turn the query log on (AdGuard Home), set privacy level 0 (Pi-hole). |
+| This isn't a Pi-hole v6 API / looks like a v5 token | Pi-hole v5 isn't supported; update to v6 and use its web or app password. |
+| Pi-hole has no free API session / Too many login attempts | Close other API clients, fix the password, wait a minute. |
+
 ## Docker
 
 Linux host, host networking (needed for discovery: ARP table, ping, mDNS/SSDP, UPnP).

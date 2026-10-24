@@ -91,13 +91,54 @@ class _SameOriginRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+USER_AGENT = f"netwarden/{netwarden.__version__}"   # how the sources see us (Pi-hole's session list)
+
+
 def opener(context=None) -> urllib.request.OpenerDirector:
     """urllib opener for the local data sources (AdGuard, Pi-hole, ntopng): same-origin
-    redirects only; `context` = an ssl.SSLContext for https (e.g. PIHOLE_VERIFY_TLS=0)."""
+    redirects only, our own User-Agent; `context` = an ssl.SSLContext for https
+    (tls_context(), e.g. PIHOLE_VERIFY_TLS=0)."""
     handlers = [_SameOriginRedirect()]
     if context is not None:
         handlers.append(urllib.request.HTTPSHandler(context=context))
-    return urllib.request.build_opener(*handlers)
+    op = urllib.request.build_opener(*handlers)
+    op.addheaders = [("User-Agent", USER_AGENT)]
+    return op
+
+
+def tls_context(verify: bool = True):
+    """The SSL context for a source's https:// URL. Certificates are verified by default;
+    `verify=False` (<SOURCE>_VERIFY_TLS=0, an explicit opt-in) accepts the self-signed
+    certificate Pi-hole, AdGuard Home and ntopng create for themselves."""
+    import ssl
+    ctx = ssl.create_default_context()
+    if not verify:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+class SourceError(OSError):
+    """A data source answered, but in a way we understand and can explain: `kind` is one
+    of conntest.ERROR_KINDS (shown as err.conn_<kind>), the message is short English with
+    the setting to check - never a secret. An OSError, so every caller already treats it
+    like "can't use the source"."""
+
+    def __init__(self, kind: str, message: str):
+        super().__init__(message)
+        self.kind = kind
+
+
+def http_error_body(e: urllib.error.HTTPError, limit: int = 64 * 1024) -> dict:
+    """The JSON body of an HTTP error answer ({} if there is none or it isn't JSON).
+    Pi-hole puts {"error": {"key", "message", "hint"}} there."""
+    try:
+        body = read_json(e, limit=limit, seconds=5.0)
+    except (OSError, ValueError, AttributeError):
+        return {}
+    finally:
+        e.close()
+    return body if isinstance(body, dict) else {}
 
 
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024   # one page of a source's API (a few hundred KB normally)
@@ -153,8 +194,17 @@ def read_source_json(resp, what: str, url_var: str) -> dict:
 # the wizard and `netwarden status` say it in the user's language (error_text()).
 # Order matters: the first match wins. Unknown errors are shown as stored.
 _ERROR_KINDS = (
+    # round 9 V: the source told us exactly what is wrong (SourceError messages)
+    ("tls", re.compile(r"certificate verify failed|CERTIFICATE_VERIFY_FAILED|"
+                       r"WRONG_VERSION_NUMBER|certificate is not trusted", re.I)),
+    ("seats", re.compile(r"api seats|no free API session", re.I)),
+    ("totp", re.compile(r"\b2FA\b|two-factor|\btotp\b", re.I)),
+    ("token_v5", re.compile(r"v5 API token", re.I)),
+    ("version", re.compile(r"Pi-hole v5|not a Pi-hole v6", re.I)),
+    ("log_off", re.compile(r"query log is turned off|privacy level", re.I)),
+    ("rate_limited", re.compile(r"rate.limit|too many (?:login )?(?:attempts|requests)|\b429\b", re.I)),
     ("bad_response", re.compile(r"json|expecting value|response refused|not a .* answer", re.I)),
-    ("auth", re.compile(r"\b40[13]\b|password|unauthori[sz]ed|forbidden|login", re.I)),
+    ("auth", re.compile(r"\b40[13]\b|password|unauthori[sz]ed|forbidden|login|not.granted", re.I)),
     ("timeout", re.compile(r"timed? ?out|timeout", re.I)),
     ("refused", re.compile(r"connection refused|errno 111\b|winerror 10061", re.I)),
     ("unreachable", re.compile(r"name or service not known|nodename nor servname|"
@@ -201,7 +251,7 @@ DNS_SOURCES = ("adguard", "pihole")   # one of them feeds the dns loop (dns_inge
 
 def _secrets(env: dict) -> list:
     return [env.get(k, "") for k in ("ANTHROPIC_API_KEY", "NETWARDEN_AI_KEY", "ADGUARD_PASS",
-                                     "PIHOLE_PASSWORD", "NTOPNG_PASS")]
+                                     "PIHOLE_PASSWORD", "NTOPNG_PASS", "NTOPNG_TOKEN")]
 
 
 def _parse(ts: str | None):

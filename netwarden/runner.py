@@ -293,7 +293,7 @@ class Runner:
 
     def start(self) -> "Runner":
         secrets = [self.env.get(k, "") for k in
-                   (*dns_ingest.SECRET_KEYS, "NTOPNG_PASS", "ANTHROPIC_API_KEY")]
+                   (*dns_ingest.SECRET_KEYS, "NTOPNG_PASS", "NTOPNG_TOKEN", "ANTHROPIC_API_KEY")]
         for name, (interval, job) in self.jobs.items():
             if interval is None:
                 self.skipped[name] = job

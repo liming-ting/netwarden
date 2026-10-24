@@ -35,11 +35,19 @@ explanations).
   ask questions.
 - Dashboard in 12 languages (default Traditional Chinese), light and dark, phone and desktop,
   keyboard accessible; optional phone access on your LAN with pairing.
+- Keyboard first: **Ctrl+K** (**Cmd+K** on a Mac, or the search box) opens a command palette
+  that finds devices, people, rooms, pages and settings and runs actions (mute for an hour,
+  mark all read, switch theme or language, ask the assistant); `?` lists every shortcut.
+- **Shareable home report**: a plain-language 7- or 30-day summary (score, suggestions,
+  devices, security, network health, notable events) as one self-contained HTML file
+  (prints on A4/Letter, no external requests) or Markdown; three privacy levels, and the
+  default "shareable" hides MACs, IPs, domains and family names. See [docs/report.md](docs/report.md).
 
 | | |
 |---|---|
 | ![Device details drawer](docs/images/device-drawer-desktop.png) | ![Network health, dark theme](docs/images/health-dark.png) |
 | ![Offline assistant answer](docs/images/assistant-offline.png) | ![Family page on a phone, Traditional Chinese](docs/images/family-phone-zh-TW.png) |
+| ![Command palette: devices and actions for "galaxy"](docs/images/palette.png) | |
 
 All screenshots use the built-in synthetic demo home (`python3 -m netwarden demo`).
 

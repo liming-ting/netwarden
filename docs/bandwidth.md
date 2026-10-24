@@ -34,7 +34,15 @@ NTOPNG_URL=http://<ntopng-host>:3000
 NTOPNG_USER=...
 NTOPNG_PASS=...
 NTOPNG_IFID=0        # optional: ntopng interface id
+# NTOPNG_TOKEN=...   # instead of user + password: an API token (ntopng user settings)
+# NTOPNG_VERIFY_TLS=0  # only for https:// with a self-signed certificate
 ```
+
+The ntopng user only needs to read the interface: netwarden calls one endpoint,
+`GET /lua/rest/v2/get/host/active.lua` (REST API v2, local hosts, paged). Wrong
+credentials make ntopng send its login page; netwarden then says "Login refused".
+`NTOPNG_IFID` is the interface number ntopng shows in its interface menu (0 is the first);
+a wrong one is reported as `INVALID_INTERFACE`.
 
 `python3 -m netwarden run` then samples every 30 seconds. To sample on its own:
 `python3 -m netwarden traffic --watch 30`. Totals and rates need at least two samples.

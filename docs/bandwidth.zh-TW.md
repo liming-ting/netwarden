@@ -33,7 +33,14 @@ NTOPNG_URL=http://<ntopng 主機>:3000
 NTOPNG_USER=...
 NTOPNG_PASS=...
 NTOPNG_IFID=0        # 選填:ntopng 的介面編號
+# NTOPNG_TOKEN=...   # 取代帳號 + 密碼:API 權杖(ntopng 的使用者設定)
+# NTOPNG_VERIFY_TLS=0  # 只有 https:// 搭配自簽憑證時才需要
 ```
+
+ntopng 帳號只要能讀取該介面即可:netwarden 只呼叫一個端點
+`GET /lua/rest/v2/get/host/active.lua`(REST API v2、本地主機、分頁)。帳密錯誤時 ntopng 會
+回它的登入頁,netwarden 會顯示「登入被拒」。`NTOPNG_IFID` 是 ntopng 介面選單中的介面編號
+(第一個是 0);填錯會顯示 `INVALID_INTERFACE`。
 
 `python3 -m netwarden run` 會每 30 秒取樣一次;也可以單獨跑
 `python3 -m netwarden traffic --watch 30`。總量和速率至少要兩次取樣才算得出來。

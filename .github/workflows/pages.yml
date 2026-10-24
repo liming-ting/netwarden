@@ -1,0 +1,58 @@
+# The static live demo on GitHub Pages (round 9 W): scripts/build_static_demo.py builds the
+# real dashboard on a made-up home into plain files; the official Pages actions publish it
+# at https://liming-ting.github.io/netwarden/. Run by hand only (Actions > "Live demo
+# (GitHub Pages)" > Run workflow) after Pages is enabled with Source "GitHub Actions" -
+# see launch/release_checklist.md. Nothing here touches the package or the images.
+name: Live demo (GitHub Pages)
+
+on:
+  workflow_dispatch:
+
+# no token permissions by default; only the deploy job gets what Pages needs
+permissions: {}
+
+# one deployment at a time; a run in progress is not cancelled half-way through a deploy
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read       # configure-pages reads the site's settings (its base URL)
+    env:
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - id: pages
+        uses: actions/configure-pages@v6
+      - name: Build the static demo
+        env:   # an output goes in through the environment, never pasted into the script
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: python3 scripts/build_static_demo.py --out _site --site-url "$SITE_URL/"
+      - name: Check the size
+        run: du -sh _site && test "$(du -sb _site | cut -f1)" -lt 20000000
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+          include-hidden-files: true   # .nojekyll
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write      # to deploy to Pages
+      id-token: write   # to verify the deployment comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

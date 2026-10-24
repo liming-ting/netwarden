@@ -33,11 +33,18 @@
   0-100 分的家庭網路分數與建議,以及可以發問的助理。
 - 儀表板支援 12 種語言(預設繁體中文)、淺色與深色、手機與電腦、可完整用鍵盤操作;
   也可選擇在區域網路內配對手機使用。
+- 鍵盤優先:按 **Ctrl+K**(Mac 為 **Cmd+K**,或點搜尋框)開啟指令面板,可以找裝置、成員、房間、
+  頁面和設定,也能直接執行動作(靜音 1 小時、全部標為已讀、切換主題或語言、問助理);
+  按 `?` 看所有快捷鍵。
+- **可分享的家庭網路報告**:7 天或 30 天的白話摘要(分數、建議、裝置、安全、網路健康、
+  重要事件),單一 HTML 檔(可列印 A4/Letter,無外部連線)或 Markdown;三種隱私等級,
+  預設「可分享」會隱藏 MAC、IP、網域和家人名字。見 [docs/report.zh-TW.md](docs/report.zh-TW.md)。
 
 | | |
 |---|---|
 | ![裝置詳情](docs/images/device-drawer-desktop.png) | ![網路健康(深色主題)](docs/images/health-dark.png) |
 | ![離線助理的回答](docs/images/assistant-offline.png) | ![手機上的家庭頁面(繁體中文)](docs/images/family-phone-zh-TW.png) |
+| ![指令面板:搜尋「galaxy」的裝置與動作](docs/images/palette.png) | |
 
 所有截圖都來自內建的模擬示範家庭(`python3 -m netwarden demo`)。
 

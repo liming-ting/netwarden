@@ -229,6 +229,10 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
               cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
 .seg button + button { border-left: 1px solid var(--line-2); }
 .seg button[aria-pressed="true"] { background: var(--acc-soft); color: var(--acc); }
+.seg button:disabled { cursor: not-allowed; text-decoration: line-through; }
+/* round 9 X: the Report page - option groups wrap on a phone instead of overflowing */
+.share-form .seg { flex-wrap: wrap; align-self: flex-start; max-width: 100%; }
+.share-form .seg button { flex: 1 1 auto; justify-content: center; }
 
 /* --- tags, badges, grades --- */
 .tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 640; border-radius: var(--r-xs);
@@ -530,6 +534,8 @@ textarea.rule { width: 100%; height: 104px; font: 12px/1.5 var(--mono); backgrou
 .sheet-h { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s4); }
 .sheet-h h2 { font-size: var(--fs-md); font-weight: 650; display: flex; gap: var(--s2); align-items: center; }
 .kbds .kk { white-space: nowrap; color: var(--mut); font-size: var(--fs-xs); }
+.keys-pref { padding-bottom: var(--s3); margin-bottom: var(--s3); border-bottom: 1px solid var(--line); }
+.keys-off { display: flex; gap: var(--s2); align-items: flex-start; margin: 0 0 var(--s3); }
 
 /* --- palette --- */
 .palette { position: fixed; inset: 0; z-index: 60; background: rgb(8 12 20 / .38); display: flex; justify-content: center; align-items: flex-start;
@@ -542,9 +548,16 @@ textarea.rule { width: 100%; height: 104px; font: 12px/1.5 var(--mono); backgrou
 .pal-list .ph { font-size: 11px; font-weight: 650; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: var(--s2) var(--s3) 4px; }
 .pal-list .pi { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3); border-radius: var(--r-sm); cursor: pointer; min-width: 0; }
 .pal-list .pi .pl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pal-list .pi .phint { color: var(--faint); font-size: var(--fs-xs); white-space: nowrap; }
+.pal-list .pi .phint { color: var(--faint); font-size: var(--fs-xs); white-space: nowrap; flex: 0 1 auto; min-width: 0; max-width: 45%;
+                       overflow: hidden; text-overflow: ellipsis; }
 .pal-list .pi[aria-selected="true"] { background: var(--acc-soft); color: var(--acc); }
 .pal-list .pnone { padding: var(--s4); color: var(--mut); text-align: center; }
+.pal-list ul { list-style: none; margin: 0; padding: 0; }
+/* "Ask the assistant": the explanation goes under the label (it never squeezes it away) */
+.pal-list .pi.two { flex-wrap: wrap; row-gap: 2px; }
+.pal-list .pi.two .phint { flex-basis: 100%; max-width: none; white-space: normal; padding-left: calc(18px + var(--s3)); }
+.pal-list .pkeys { display: inline-flex; gap: 3px; flex: none; }
+.pal-list .pi[aria-selected="true"] .phint { color: inherit; }
 .pal-foot { border-top: 1px solid var(--line); padding: var(--s2) var(--s4); font-size: var(--fs-xs); color: var(--faint); }
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { opacity: 0; transform: translateY(-6px) scale(.985); } }
@@ -568,6 +581,7 @@ textarea.rule { width: 100%; height: 104px; font: 12px/1.5 var(--mono); backgrou
 .empty .ei { width: 48px; height: 48px; border-radius: 14px; background: var(--surface-2); display: grid; place-items: center; margin: 0 auto var(--s3); color: var(--faint); }
 .empty .ei .ic { width: 24px; height: 24px; }
 .empty .et { color: var(--fg); font-weight: 620; }
+.empty .et + div > .btn:first-child { margin-top: var(--s3); }
 .empty.ok .ei { background: var(--ok-soft); color: var(--ok); }
 .skel { border-radius: var(--r-xs); background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
         background-size: 200% 100%; animation: shimmer 1.3s infinite linear; height: 14px; margin: 10px 0; }
@@ -1237,6 +1251,15 @@ tr.flash > td, .rows > li.flash { animation: flashbg 1.6s ease-out; }
 .banner.info { background: var(--acc-soft); color: var(--fg); font-weight: 500; margin-top: var(--s2); }
 .banner.info > .ic { color: var(--acc); flex: none; }
 .banner > span { min-width: 0; }
+/* round 9 W: the static live demo's banner (only its index.html turns demo mode on) */
+.demobar .demolinks { display: inline-flex; flex-wrap: wrap; gap: 0 var(--s3); margin-left: var(--s1); }
+.demobar a { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.demobar .btn { flex: none; }
+@media (max-width: 760px) {   /* phones: text + links beside the close button, no icon */
+  .banner.demobar { flex-wrap: nowrap; align-items: flex-start; padding-right: var(--s2); }
+  .banner.demobar > .ic { display: none; }
+  .banner.demobar .btn { margin-left: auto; margin-top: -2px; }
+}
 .boot-spin { width: 28px; height: 28px; margin: 18vh auto 0; border-radius: 50%; border: 3px solid var(--line);
   border-top-color: var(--acc); animation: spin 1s linear infinite; }
 .boot-fail { margin: 12vh auto 0; }
