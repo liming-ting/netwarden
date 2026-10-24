@@ -18,6 +18,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from netwarden import activity, brain, demo, i18n, live, pairing, since, store, suggestions, web
 
@@ -219,7 +220,12 @@ class SinceTests(unittest.TestCase):
         db = store.connect(self.path)
         try:
             now = datetime.now(timezone.utc)
-            r = since.report(db, _iso(now - timedelta(hours=12)), "en")
+            # every alert, not the first MAX_ITEMS: when last night's quiet hours fall
+            # inside the visit (a morning visit, or CI at 09:45 UTC), the summary's
+            # released alerts come first and push the spike past the cap
+            with mock.patch.object(since, "MAX_ITEMS", 50):
+                r = since.report(db, _iso(now - timedelta(hours=12)), "en")
+            self.assertEqual(r["alerts"]["n"], len(r["alerts"]["items"]))
             self.assertEqual(r["devices"]["n"], 1)               # the robot vacuum, 6 h ago
             # the fix that took effect is the parents' school-night bedtime rule: it covers
             # the tablet's 01:00 lookups only when last night was a school night (Sun-Thu).

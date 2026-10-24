@@ -88,6 +88,15 @@ class FakeOpenAI(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def handle(self):
+        # the client hangs up on purpose in some tests (Stop closes the upstream stream, a
+        # read timeout gives up on "slow", "AFTER-DONE" goes to a reader that already left):
+        # expected, so not a traceback on stderr (CI1: it looked like a failure in the log)
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
 
 def _serve(handler):
     srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)

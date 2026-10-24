@@ -323,7 +323,8 @@ class CI(unittest.TestCase):
                        "concurrency:", "cancel-in-progress: true", "actions/setup-python@",
                        "actions/setup-node@", "python3 -m unittest discover -s tests",
                        "node tests/js/map_layout_test.js", "python3 -m netwarden.i18n --check",
-                       "python3 -m compileall -q netwarden", "persist-credentials: false", "TZ: UTC"):
+                       "python3 -m compileall -q netwarden", "persist-credentials: false",
+                       "TZ: ${{ matrix.python == '3.11' && 'UTC' || 'Asia/Taipei' }}"):
             self.assertIn(needle, self.wf)
         self.assertNotIn("secrets.", self.wf)
         self.assertNotIn("OWNER", self.wf)

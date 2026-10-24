@@ -53,8 +53,21 @@ python3 -m compileall -q netwarden
 Tests never touch the real network or a real AI: they use fake servers on ephemeral
 `127.0.0.1` ports and fake providers. They must pass on a fresh checkout with `TZ=UTC` and no
 `.env`, and create every file they need (databases, fixtures) themselves. Pin clocks
-(`demo.build(path, now=...)`) instead of depending on the time of day. Every change comes
-with tests; CI runs the same commands on every pull request.
+(`demo.build(path, now=...)`) instead of depending on the time of day, and write
+expectations in a pinned zone (`tests/tzkit.py`: `with pinned_tz("Asia/Taipei"): ...`) or in
+whatever zone the test runs in. Every change comes with tests; CI runs the same commands on
+every pull request, under `TZ=UTC` and `TZ=Asia/Taipei`, plus the time-sensitive modules
+under America/Los_Angeles and Pacific/Auckland.
+
+Before you push anything that touches times, days or the demo data, run the suite in
+several zones (UTC, Taipei, Los Angeles, Kolkata with its half-hour offset, Auckland; it
+sets `NETWARDEN_TZ` too, so a local `.env` cannot pin them all to one zone):
+
+```bash
+bash scripts/dev/tz_sweep.sh                             # full suite, five zones (~15 min)
+bash scripts/dev/tz_sweep.sh Europe/Berlin               # one zone of your choice
+TESTS="tests.test_stage_q tests.test_cli" bash scripts/dev/tz_sweep.sh   # a few modules
+```
 
 Heavier checks: `NETWARDEN_FUZZ=heavy python3 -m unittest tests.test_stage_k_fuzz`,
 `python3 scripts/perf_db.py all` (300-device timing DB under /tmp),

@@ -3,8 +3,9 @@
 # 127.0.0.1 ports only.
 #
 # Actions minutes: a normal push or pull request tests the oldest and the newest supported
-# Python (3.11 + 3.15, ~4 min each); a v* tag and a manual run (workflow_dispatch) test
-# every version in between too. Nothing to cache: there are no dependencies to install.
+# Python (3.11 + 3.15, ~4 min each) and the time-sensitive modules in two more time zones
+# (~3 min); a v* tag and a manual run (workflow_dispatch) test every version in between
+# too. Nothing to cache: there are no dependencies to install.
 name: ci
 
 on:
@@ -33,7 +34,10 @@ jobs:
         # (3.15.0 final: 2026-10-09; stable on the hosted runners, no pre-releases here)
         python: ${{ fromJSON((startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && '["3.11", "3.12", "3.13", "3.14", "3.15"]' || '["3.11", "3.15"]') }}
     env:
-      TZ: UTC
+      # two zones for the price of one: the oldest Python in UTC, every other in the
+      # project's home zone (+8). A fixed offset and the runner's clock (any hour) both
+      # used to hide tests that assumed one zone or one time of day (CI1).
+      TZ: ${{ matrix.python == '3.11' && 'UTC' || 'Asia/Taipei' }}
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - uses: actions/checkout@v7
@@ -48,6 +52,27 @@ jobs:
         run: python3 -m netwarden.i18n --check
       - name: Unit tests
         run: python3 -m unittest discover -s tests
+
+  # the time-sensitive modules (demo stories, quiet hours, bedtime, day buckets, weekly,
+  # since, presence, health) under a negative zone with DST and one past the date line
+  tz:
+    name: time zones
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      TESTS: >-
+        tests.test_cli tests.test_d2_units tests.test_e2 tests.test_stage_f tests.test_stage_h
+        tests.test_stage_p tests.test_stage_q tests.test_stage_t tests.test_alerts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Unit tests (America/Los_Angeles, Pacific/Auckland)
+        run: bash scripts/dev/tz_sweep.sh America/Los_Angeles Pacific/Auckland
 
   js:
     name: map layout (node)

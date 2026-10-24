@@ -69,9 +69,24 @@ def _zone(name: str) -> tzinfo | None:
 
 
 def _system_zone_name() -> str | None:
-    """The system zone's IANA name from /etc/localtime (Linux/WSL/macOS), if any."""
+    """The system zone's IANA name, if any: the TZ environment variable when it names a
+    zone ("Europe/Berlin", ":Asia/Kolkata" or a zoneinfo file path - what `docker run -e
+    TZ=...` and the C library use), else /etc/localtime (Linux/WSL/macOS). A TZ we cannot
+    name (a POSIX rule like "CST-8") -> None: the caller falls back to the current UTC
+    offset, which the C library computed from that same TZ."""
+    env = (os.environ.get("TZ") or "").strip()
+    if env:
+        env = env[1:] if env.startswith(":") else env
+        if env.startswith("/"):
+            return _zone_name_of_file(env)
+        return env if _zone(env) is not None else None
+    return _zone_name_of_file("/etc/localtime")
+
+
+def _zone_name_of_file(path: str) -> str | None:
+    """"Asia/Taipei" for /usr/share/zoneinfo/Asia/Taipei (or a link to it), else None."""
     try:
-        real = os.path.realpath("/etc/localtime")
+        real = os.path.realpath(path)
     except OSError:
         return None
     marker = "zoneinfo" + os.sep
@@ -93,7 +108,7 @@ def _warn_bad_tz(name: str) -> None:
 
 def local_tz(name: str | None = None) -> tzinfo:
     """The local time zone: `name` (or NETWARDEN_TZ) via zoneinfo, else the system's
-    zone (by name when /etc/localtime tells us, else its current UTC offset)."""
+    zone (by name when TZ or /etc/localtime tells us, else its current UTC offset)."""
     name = (name if name is not None else _configured_tz_name() or "").strip()
     if name and _zone(name) is None:
         _warn_bad_tz(name)

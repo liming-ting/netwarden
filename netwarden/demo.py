@@ -622,21 +622,30 @@ DEMO_RULE = {"name": "上學日晚上", "owner": "小孩", "mac": None, "days": 
              "start": "22:00", "end": "07:00", "min_minutes": 15, "enabled": True}
 
 
+def _day_rng(story: str, day, key: str = "") -> random.Random:
+    """An RNG of its own for one LOCAL day of a story (a str seed is hashed the same way
+    in every process). Crossing a local midnight then only adds the new day and drops the
+    oldest one: the days in between keep their exact events, instead of every later draw
+    shifting with the first day of the window."""
+    return random.Random(f"{SEED}:{story}:{key}:{day.isoformat()}")
+
+
 def build_family(db, now: datetime, tz) -> int:
-    """Insert the FAMILY sessions of the last FAMILY_DAYS local days (own RNG + own event
-    builder, so every earlier story keeps its exact events). Returns # events."""
-    frng = random.Random(SEED + 7)
+    """Insert the FAMILY sessions of the last FAMILY_DAYS local days (an RNG per device
+    and day + own event builder, so every earlier story keeps its exact events).
+    Returns # events."""
     ip = {d["mac"]: d["ip"] for d in DEVICES}
     host = {d["mac"]: d["hostname"] or None for d in DEVICES}
     local_now = now.astimezone(tz)
     today = local_now.date()
     this_from = today - timedelta(days=6)
-    events, uniq = [], 0
+    events = []
     for mac, plan in FAMILY.items():
         lo, hi = CADENCE.get(mac, DEFAULT_CADENCE)
         for back in range(FAMILY_DAYS, -1, -1):
             day = today - timedelta(days=back)
             week = "this" if day >= this_from else "last"
+            frng, uniq = _day_rng("family", day, mac), 0
             for which, days, start, end, domains in plan:
                 if which not in ("both", week) or day.weekday() not in days:
                     continue
@@ -734,8 +743,7 @@ def build_presence(db, now: datetime, tz) -> int:
     """PRESENCE_DAYS of presence-check samples (every CHECK_EVERY_MIN while home) for the two
     presence phones, their lookups removed while they were out (a phone at work or school
     is not on the home Wi-Fi), and light routine lookups for the Stage P devices.
-    Own RNG. Returns # DNS events added."""
-    prng = random.Random(SEED + 11)
+    An RNG per local day (_day_rng). Returns # DNS events added."""
     local_now = now.astimezone(tz)
     start = now - timedelta(days=PRESENCE_DAYS)
     ip = {d["mac"]: d["ip"] for d in DEVICES}
@@ -745,7 +753,8 @@ def build_presence(db, now: datetime, tz) -> int:
         for back in range(PRESENCE_DAYS, -1, -1):
             day = local_now.date() - timedelta(days=back)
             away.setdefault(mac, []).extend(
-                away_windows(kind, day, tz, prng, late=(kind == "school" and back == LATE_DAYS_AGO)))
+                away_windows(kind, day, tz, _day_rng("away", day, mac),
+                             late=(kind == "school" and back == LATE_DAYS_AGO)))
     with db:
         for mac, wins in away.items():
             for a, b in wins:
@@ -756,13 +765,14 @@ def build_presence(db, now: datetime, tz) -> int:
     def home(mac, t):
         return not any(a <= t < b for a, b in away.get(mac, []))
 
-    def lookup(mac, t, domains, wanted):
+    def lookup(rng, mac, t, domains, wanted):
         # the RNG is drawn whether or not the lookup is kept, so a step that flips (now
         # crossed an hour boundary between two builds) changes one event, not every
-        # draw after it
-        domain, elapsed = prng.choice(domains), round(prng.uniform(0.5, 20.0), 2)
+        # draw after it; the timestamp depends on the step alone (one lookup per device
+        # and step: (ts, client_ip, domain) stays unique)
+        domain, elapsed = rng.choice(domains), round(rng.uniform(0.5, 20.0), 2)
         if wanted:
-            events.append({"source": "demo", "ts": _utc(t + timedelta(microseconds=len(events) * 11 + 3)),
+            events.append({"source": "demo", "ts": _utc(t + timedelta(microseconds=3)),
                            "client_ip": ip[mac], "client_name": host[mac], "domain": domain,
                            "qtype": "A", "status": "NOERROR", "reason": "NotFilteredNotFound",
                            "blocked": 0, "block_reason": None, "cached": 0, "upstream": "192.168.1.1:53",
@@ -782,20 +792,35 @@ def build_presence(db, now: datetime, tz) -> int:
         slot += 1
         t += timedelta(seconds=step)
     # routine lookups (never screen time): the kid's phone while home and awake, Mom's
-    # laptop in the day, Dad's iPhone on its new address since it appeared. The walk is
-    # anchored to a LOCAL midnight (+17 s, off the minute grid the away windows and hour
-    # checks use), not to `now`: a later build only adds the steps that have happened
-    # since, instead of sliding every step across those boundaries
-    t = datetime.combine(start.astimezone(tz).date(), datetime.min.time(), tzinfo=tz) \
-        + timedelta(seconds=17)
-    while t < now:
-        lt = t.astimezone(tz)
-        awake, inside = 7 <= lt.hour < 23, t >= start
-        lookup(KID_PHONE, t, ROUTINE_ANDROID, inside and awake and home(KID_PHONE, t))
-        lookup(MOM_LAPTOP, t, ROUTINE_APPLE, prng.random() < 0.3 and inside and 9 <= lt.hour < 22)
-        lookup(DAD_NEW_MAC, t, ROUTINE_APPLE,
-               prng.random() < 0.6 and awake and t >= now - timedelta(days=2))
-        t += timedelta(minutes=prng.randint(15, 40))
+    # laptop in the day, Dad's iPhone on its new address since it appeared. One walk per
+    # LOCAL day, from its midnight (+17 s, off the minute grid the away windows and hour
+    # checks use) with that day's own RNG - not anchored to `now`: a later build only adds
+    # the steps that have happened since, instead of sliding every step across those
+    # boundaries, and a new day never reshuffles the days before it
+    day = start.astimezone(tz).date()
+    while True:
+        t = datetime.combine(day, datetime.min.time(), tzinfo=tz) + timedelta(seconds=17)
+        if t >= now:
+            break
+        rng = _day_rng("routine", day)
+        kid_last = t                     # the kid's phone's last background lookup today
+        day += timedelta(days=1)
+        midnight = datetime.combine(day, datetime.min.time(), tzinfo=tz)
+        while t < midnight and t < now:
+            lt = t.astimezone(tz)
+            awake, inside = 7 <= lt.hour < 23, t >= start
+            # asleep, the phone still checks in now and then (at most ~2 h apart, far below
+            # the night-activity alert): never 8 silent hours that read as a DNS blind spot
+            # ("quiet") on the mornings its first lookup came only after it left for school
+            kid = awake or rng.random() < 0.3 or t - kid_last >= timedelta(hours=2)
+            lookup(rng, KID_PHONE, t, ROUTINE_ANDROID, inside and kid and home(KID_PHONE, t))
+            if kid and home(KID_PHONE, t):
+                kid_last = t
+            lookup(rng, MOM_LAPTOP, t, ROUTINE_APPLE,
+                   rng.random() < 0.3 and inside and 9 <= lt.hour < 22)
+            lookup(rng, DAD_NEW_MAC, t, ROUTINE_APPLE,
+                   rng.random() < 0.6 and awake and t >= now - timedelta(days=2))
+            t += timedelta(minutes=rng.randint(15, 40))
     store.insert_presence_samples(db, samples)
     return store.insert_events(db, events)
 
@@ -995,7 +1020,10 @@ DEMO_TUNING = (
     ("70:9e:29:55:3b:81", "mute:spike", 1),     # PS5 game downloads: off for a day
     ("5c:e9:1e:7a:44:b8", "less:night", None),  # robot vacuum: less sensitive
 )
-SUMMARY_KINDS = ("night", "change", "new", "bedtime", "visibility")   # never critical
+# never critical, and never a kind the family had already seen two days before (SEEN_KINDS:
+# the Twitch change once landed in last night's summary on afternoon builds, so it showed
+# up again in "Since your last visit")
+SUMMARY_KINDS = ("night", "new", "bedtime", "visibility")
 SUMMARY_MAX = 4
 
 
@@ -1063,17 +1091,26 @@ def _seed_quiet(db, now: datetime, tz) -> None:
 
 def _repair_quiet(db) -> None:
     """Older demo DBs: the seeded summary listed a "new device" that joined only AFTER
-    that night ended. Drop such lines (idempotent; the summary's seen state stays)."""
+    that night ended, or an alert the family had seen two days before (SEEN_KINDS). Drop
+    such lines (idempotent; the summary's seen state stays); _seed_seen then logs the
+    latter as seen."""
+    from netwarden import notify
+    seen = {notify.ALERT + k for k in SEEN_KINDS}
     for s in db.execute("SELECT id, end_ts, items FROM quiet_summaries").fetchall():
         items = json.loads(s["items"] or "[]")
-        keep = []
+        keep, drop = [], []
         for it in items:
             row = db.execute("SELECT first_seen FROM devices WHERE mac = ?",
                              (it.get("mac"),)).fetchone() if it.get("kind") == "alert.new" else None
-            if row is None or row["first_seen"] < s["end_ts"]:
+            if it.get("kind") in seen:
+                drop.append(it)
+            elif row is None or row["first_seen"] < s["end_ts"]:
                 keep.append(it)
         if len(keep) != len(items):
             with db:
+                for it in drop:
+                    db.execute("DELETE FROM notify_log WHERE key = ? AND state = 'released'",
+                               (it.get("key"),))
                 if keep:
                     db.execute("UPDATE quiet_summaries SET items = ? WHERE id = ?",
                                (json.dumps(keep, ensure_ascii=False), s["id"]))

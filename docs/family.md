@@ -29,8 +29,8 @@ for a family conversation, not surveillance (`fam.note`, `digest.family_note`).
 
 3. **No double counting, 60 min per hour.** Per local hour, the device's *real* time is
    the union of all its sessions (capped at 60 min); when apps overlap, their shares
-   are scaled down to that union. Days are LOCAL days (`settings` time.timezone /
-   `NETWARDEN_TZ`; half-hour offsets work).
+   are scaled down to that union. Days are LOCAL days (`NETWARDEN_TZ` / `settings`
+   time.timezone, else the system's `TZ` or /etc/localtime; half-hour offsets work).
 4. **Aggregation.** Per device x service x day -> per member (`device_profiles.owner`;
    devices without an owner are "shared"), per category and per service. `compute()` is
    memoized in `netwarden.cache` (fingerprint + 30 s) and warmed by `runner.warm()`

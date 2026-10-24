@@ -52,7 +52,8 @@ def _when(ts: str) -> datetime | None:
 
 
 def _iso(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    # in UTC whatever zone an aware `dt` carries: stored times compare as strings
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def critical(event: dict) -> bool:

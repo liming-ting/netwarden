@@ -23,9 +23,15 @@ from pathlib import Path
 from unittest import mock
 
 from netwarden import __main__ as cli
-from netwarden import demo, i18n, store, web
+from netwarden import activity, demo, i18n, store, web
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tzkit import pinned_tz  # noqa: E402
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def run_cli(*argv):
@@ -130,10 +136,14 @@ class DemoTests(unittest.TestCase):
     def test_a_clock_step_across_a_boundary_reshuffles_nothing(self):
         # Regression: build_presence drew its RNG only for steps that were kept and walked
         # a grid relative to now, so a 0.6 s clock step across a minute boundary changed
-        # lookups (and the event count) days in the past. These boundaries all did.
-        for b in ("2026-10-24T00:00:00", "2026-10-24T01:37:00", "2026-10-24T06:28:00",
-                  "2026-10-24T16:10:00", "2026-10-24T19:24:00"):
-            at = datetime.fromisoformat(b).replace(tzinfo=timezone.utc)
+        # lookups (and the event count) days in the past. These boundaries all did - as
+        # LOCAL times (they were found in Taipei): written in UTC they were a local
+        # midnight on CI (TZ=UTC), where a new day legitimately moves the "N days ago"
+        # stories (test_a_new_local_day_keeps_the_days_before_it)
+        tz = activity.local_tz()
+        for b in ("2026-10-24T08:00:00", "2026-10-24T09:37:00", "2026-10-24T14:28:00",
+                  "2026-10-25T00:10:00", "2026-10-25T03:24:00"):
+            at = datetime.fromisoformat(b).replace(tzinfo=tz)
             before = self._rows(at - timedelta(seconds=0.3))
             after = self._rows(at + timedelta(seconds=0.3))
             for table in ("dns", "traffic"):
@@ -142,6 +152,44 @@ class DemoTests(unittest.TestCase):
             self.assertEqual([r for r in before["dns"] if r[1] in routine],
                              [r for r in after["dns"] if r[1] in routine], b)
             self.assertEqual(len(before["presence"]), len(after["presence"]), b)
+
+    def test_a_new_local_day_keeps_the_days_before_it(self):
+        # CI1: the family sessions, the presence phones' away windows and the routine walk
+        # drew ONE random stream from the first day of their window, so crossing a local
+        # midnight (the window starts a day later) reshuffled two weeks of history. Now
+        # every local day has its own stream: across midnight, the days inside both
+        # windows keep their exact rows; only the window's ends move (and the stories
+        # told relative to today, like the kid's late evening 2 days ago, on purpose).
+        for zone in ("UTC", "Asia/Taipei", "America/Los_Angeles", "Asia/Kolkata",
+                     "Pacific/Auckland"):
+            with pinned_tz(zone) as tz, self.subTest(zone=zone):
+                at = datetime(2026, 10, 25, tzinfo=tz)            # a local midnight
+                lo = _iso(at - timedelta(days=6))
+                hi = _iso(at - timedelta(days=1))
+
+                def rows(now):
+                    path = Path(self.tmp.name) / f"day-{zone.replace('/', '-')}-{now.timestamp()}.db"
+                    db = store.connect(path)
+                    try:
+                        for d in demo.DEVICES:
+                            store.upsert_device(db, {k: d[k] for k in (
+                                "ip", "mac", "vendor", "hostname", "randomized", "is_self")})
+                        demo.build_family(db, now, tz)
+                        demo.build_presence(db, now, tz)
+                        q = ("SELECT device_mac, ts, domain FROM dns_events WHERE ts >= ? AND "
+                             "ts < ? AND device_mac != ? ORDER BY 1, 2")
+                        return (db.execute(q, (lo, hi, demo.KID_PHONE)).fetchall(),
+                                db.execute("SELECT mac, ts FROM presence_samples WHERE ts >= ? "
+                                           "AND ts < ? AND mac != ? ORDER BY 1, 2",
+                                           (lo, hi, demo.KID_PHONE)).fetchall())
+                    finally:
+                        db.close()
+                before = rows(at - timedelta(seconds=0.3))
+                after = rows(at + timedelta(seconds=0.3))
+                self.assertGreater(len(before[0]), 300)     # five days of real stories
+                self.assertGreater(len(before[1]), 300)
+                self.assertEqual([tuple(r) for r in before[0]], [tuple(r) for r in after[0]])
+                self.assertEqual([tuple(r) for r in before[1]], [tuple(r) for r in after[1]])
 
     def test_refuses_to_overwrite_real_data(self):
         real = Path(self.tmp.name) / "netwarden.db"

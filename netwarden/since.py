@@ -26,7 +26,7 @@ MAX_SPAN = timedelta(days=30)    # an older last visit counts from 30 days ago
 
 
 def _iso(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def parse_since(raw: str | None, now: datetime | None = None) -> str | None:

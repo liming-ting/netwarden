@@ -142,7 +142,7 @@ def next_start(cfg: dict, now: datetime | None = None, tz=None) -> datetime | No
 
 
 def _iso(dt: datetime | None) -> str | None:
-    return dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ") if dt else None
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ") if dt else None
 
 
 def days_text(cfg: dict, lang: str) -> str:

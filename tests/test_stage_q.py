@@ -15,6 +15,7 @@ import http.client
 import io
 import json
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -29,6 +30,9 @@ from netwarden import (activity, alerts, bedtime, brain, cache, demo, explain, h
                        notify, pairing, quiet, score, store, suggestions, tuning, upnp, web)
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tzkit import pinned_tz  # noqa: E402
+
 UTC = timezone.utc
 TPE = timezone(timedelta(hours=8))
 _DEMO = {}
@@ -158,6 +162,9 @@ def event(key, kind="new", crit=False, mac="aa:bb:cc:00:00:01"):
 class HoldReleaseTests(_Empty):
     def setUp(self):
         super().setUp()
+        # the windows below are Taipei times (TPE), and so is the summary's "23:00-07:00":
+        # the title is rendered in the configured zone, which CI (TZ=UTC) would make 15:00-23:00
+        self.enterContext(pinned_tz("Asia/Taipei"))
         store.put_settings(self.db, {"quiet.enabled": "true", "quiet.start": '"23:00"',
                                      "quiet.end": '"07:00"'})
         notify.prime(self.db)
@@ -190,6 +197,32 @@ class HoldReleaseTests(_Empty):
         self.assertEqual(len(notify.summaries(self.db, "en")), 1)
         for bad in (True, "1", 0, -1, 2 ** 70, 999):
             self.assertFalse(notify.mark_seen(self.db, bad), bad)
+
+    def test_the_window_reads_the_same_in_every_zone(self):
+        """CI1: quiet hours of 23:00-07:00 are 23:00-07:00 on the user's own clock wherever
+        netwarden runs - also across a DST change (Los Angeles falls back on 1 Nov 2026) and
+        with a half-hour offset - never shifted by the zone's UTC offset."""
+        nights = {"UTC": (2026, 10, 23), "America/Los_Angeles": (2026, 10, 31),
+                  "Asia/Kolkata": (2026, 10, 23), "Pacific/Auckland": (2026, 10, 23)}
+        for i, (zone, (y, mo, d)) in enumerate(nights.items()):
+            with pinned_tz(zone) as tz, self.subTest(zone=zone):
+                db = store.connect(Path(self.tmp.name) / f"z{i}.db")
+                try:
+                    store.put_settings(db, {"quiet.enabled": "true", "quiet.start": '"23:00"',
+                                            "quiet.end": '"07:00"'})
+                    notify.prime(db)
+                    morning = datetime(y, mo, d, tzinfo=tz) + timedelta(days=1)
+                    at = lambda h, mi=0: morning.replace(hour=h, minute=mi)  # noqa: E731
+                    # local times on purpose: the stored UTC strings must not care
+                    self.assertIsNone(notify.route(db, event("z"), at(1), {},
+                                                   notify.quiet_now(db, {}, at(1))))
+                    self.assertEqual(notify.release(db, at(6, 59)), [])
+                    self.assertEqual(len(notify.release(db, at(7, 1))), 1)
+                    s = notify.summaries(db, "en")
+                    self.assertEqual(len(s), 1)
+                    self.assertIn("23:00–07:00", s[0]["title"])
+                finally:
+                    db.close()
 
     def test_release_exactly_once_across_restart_and_two_connections(self):
         self.route(event("a"), self.night)
@@ -378,6 +411,37 @@ class DemoReseedTests(unittest.TestCase):
             until = db.execute("SELECT until FROM acks WHERE domain = 'mute:spike'").fetchone()[0]
             self.assertGreater(until, store.now())
             db.close()
+
+    def test_an_alert_seen_days_ago_never_sits_in_last_nights_summary(self):
+        # CI1: on afternoon builds the seeded summary held the Twitch change, which the
+        # story says the family saw two days before - so "Since your last visit" listed it
+        # again. New builds never pick a SEEN_KINDS alert; older demo DBs are repaired.
+        self.assertFalse(set(demo.SUMMARY_KINDS) & set(demo.SEEN_KINDS))
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(demo_copy(Path(t) / "s.db"))
+            db = store.connect(p)
+            row = db.execute("SELECT id, items, win, end_ts FROM quiet_summaries").fetchone()
+            key = "change|70:9e:29:55:3b:81|change:Twitch"
+            stale = {"key": key, "kind": "alert.change", "ts": row["end_ts"],
+                     "mac": "70:9e:29:55:3b:81", "name": "PS5", "detail": ["Twitch"]}
+            with db:   # what an older build wrote
+                db.execute("DELETE FROM notify_log WHERE key = ?", (key,))
+                db.execute("INSERT INTO notify_log (key, kind, ts, state, critical, win, until, data) "
+                           "VALUES (?, 'alert.change', ?, 'released', 0, ?, ?, '{}')",
+                           (key, row["end_ts"], row["win"], row["end_ts"]))
+                db.execute("UPDATE quiet_summaries SET items = ? WHERE id = ?",
+                           (json.dumps(json.loads(row["items"]) + [stale]), row["id"]))
+            db.close()
+            demo.build(p)
+            db = store.connect(p)
+            try:
+                items = json.loads(db.execute("SELECT items FROM quiet_summaries").fetchone()[0])
+                self.assertNotIn(key, [i["key"] for i in items])
+                self.assertEqual(len(items), len(json.loads(row["items"])))   # the rest stays
+                self.assertEqual(db.execute("SELECT state FROM notify_log WHERE key = ?",
+                                            (key,)).fetchone()[0], "sent")    # seen days ago
+            finally:
+                db.close()
 
 
 # --- "Why this alert?" ------------------------------------------------------------------

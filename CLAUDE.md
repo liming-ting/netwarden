@@ -69,7 +69,7 @@ netwarden/
                     /models; 5 s connect / 120 s read; no proxy for local/LAN); check_connection
   redact.py         Redactor: names/hostnames/owners/rooms/MACs/IPs <-> [D3]/[P1]/[R2]/[M3]/
                     [IP3] (prefix-trie regex); unredact_stream (split tokens); RedactingProvider
-  activity.py       local tz (NETWARDEN_TZ > system > fixed offset); 7x24 grid, typical
+  activity.py       local tz (NETWARDEN_TZ > TZ > /etc/localtime > offset); 7x24 grid, typical
                     hours, night_alerts() (conservative; ALWAYS_ON types skipped; >=3 days)
   search.py         search(q); timeline.py per-device; export.py devices_csv (BOM, safe) + report_md
   demo.py           deterministic synthetic home (meta demo=1); refuses (NotADemoDB) a DB with
@@ -215,7 +215,7 @@ python3 -m netwarden backup [-o F] | restore F [--mode merge|replace] [--dry-run
 bash scripts/adguard_dev.sh start; python3 scripts/dns_traffic.py   # DEV AdGuard (DNS :5354, API :3000); never for users
 python3 -m netwarden.web --db data/demo.db; python3 -m netwarden.alerts --db data/demo.db  # must work
 python3 scripts/perf_db.py all | bench --warm; python3 scripts/soak.py --minutes 20 --port 8799   # perf; soak (exit 1)
-python3 -m unittest discover -s tests          # 1152 tests, all must pass (+ node tests/js/*.js)
+python3 -m unittest discover -s tests          # 1163 tests, all must pass (+ node tests/js/*.js)
 ```
 Windows: `scripts\start_windows.cmd` (:8787) / `start_demo_windows.cmd` (:8788). Manual checks: own `--offline-ai` server on
 127.0.0.1:8799 on a COPY of the demo DB (sqlite3 `.backup` to /tmp); never touch a dashboard someone else is using.
@@ -235,13 +235,15 @@ AGPL-3.0-or-later (PEP 639 pyproject; LICENSE = verbatim text, hash-pinned: NEVE
 `netwarden.LICENSE` / `SOURCE_URL` / `COPYRIGHT` = ONE source (Settings About card, `--version` lines 2-3 - line 1 is
 fixed, /api/meta `license|source_url|copyright`); .gitattributes (LF; .cmd/.bat CRLF); CI = 3.11 + 3.15 on push/PR, full
 matrix on v* tags / manual, images pushed ONLY from v* tags after docker.yml `smoke` + `tests`. Owner LAN values are
-read from CLAUDE.local.md at test time (test_round6_o) - never write them into a test. **Next:** first push + v0.1.0 (launch/release_checklist.md).
-Later: block_reason breakdown; HTTPS.
+read from CLAUDE.local.md at test time (test_round6_o) - never write them into a test. **CI1** (test_ci1.py): suite under TZ=UTC
+(3.11) + Asia/Taipei, job `tz` = time-sensitive modules in LA + Auckland (`scripts/dev/tz_sweep.sh`); demo stories: one RNG per
+LOCAL day (`demo._day_rng`). **Next:** v0.1.0 (launch/release_checklist.md). Later: block_reason breakdown; HTTPS.
 
 ## Conventions
 - stdlib only; match the plain, commented style of `discovery.py` / `dns_ingest.py`.
 - New data sources = adapters like `dns_ingest.Source` / `TrafficSource`; unconfigured ones change nothing.
-- Tests never call the real LLM or network (fake providers, ephemeral 127.0.0.1). Must pass on a fresh copy, TZ=UTC, no `.env`
-  (a local `.env` may pin NETWARDEN_TZ); pin demo clocks (`demo.build(path, now=)`); weekday stories assert both branches.
+- Tests never call the real LLM or network (fake providers, ephemeral 127.0.0.1). Must pass on a fresh copy, no `.env`, in ANY zone
+  at ANY hour (tz_sweep.sh; `.env` NETWARDEN_TZ beats TZ); zone-specific expectations under `tests/tzkit.pinned_tz`; pin demo
+  clocks (`demo.build(path, now=)`); weekday stories assert both branches.
 - No hard-coded UI/user-facing text: add a key to EVERY `netwarden/locales/*.json` (zh-Hant genuinely
   Traditional/Taiwanese, zh-Hans Simplified; zh punctuation ASCII , : ( )). Escape all HTML; CSV via `export.safe_cell`; never echo secrets.

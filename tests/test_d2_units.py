@@ -196,6 +196,33 @@ class ActivityTests(unittest.TestCase):
         self.assertEqual(activity.tz_label(timezone(timedelta(hours=-3))), "UTC-03:00")
         self.assertEqual(activity.tz_label(UTC), "UTC")
 
+    def test_the_system_zone_honors_tz(self):
+        """CI1: without NETWARDEN_TZ (or .env / the setting) the system zone is the TZ
+        environment variable when set (docker run -e TZ=..., CI's TZ=UTC), then
+        /etc/localtime; a POSIX rule we cannot name falls back to its UTC offset."""
+        import time
+        nothing = mock.patch.object(activity, "_configured_tz_name", return_value=None)
+        cases = {"America/Los_Angeles": "America/Los_Angeles", ":Asia/Kolkata": "Asia/Kolkata",
+                 "/usr/share/zoneinfo/Pacific/Auckland": "Pacific/Auckland", "UTC": "UTC"}
+        try:
+            for tz, want in cases.items():
+                if want != "UTC" and activity._zone(want) is None:
+                    continue   # (no tzdata for it here)
+                with nothing, mock.patch.dict(os.environ, {"TZ": tz}), self.subTest(tz=tz):
+                    if tz.startswith("/") and not os.path.exists(tz):
+                        continue
+                    self.assertEqual(activity.tz_label(activity.local_tz()), want)
+            with nothing, mock.patch.dict(os.environ, {"TZ": "XYZ-8"}):
+                time.tzset()
+                self.assertIsNone(activity._system_zone_name())
+                self.assertEqual(datetime(2026, 1, 1, tzinfo=activity.local_tz()).utcoffset(),
+                                 timedelta(hours=8))
+            # NETWARDEN_TZ still wins over TZ
+            with mock.patch.dict(os.environ, {"TZ": "UTC", "NETWARDEN_TZ": "Asia/Taipei"}):
+                self.assertEqual(activity.tz_label(activity.local_tz()), "Asia/Taipei")
+        finally:
+            time.tzset()
+
     def alerts(self, types=None):
         return activity.night_alerts(self.db, types=types or {KID: "tablet"}, tz=UTC, now=NOW)
 
