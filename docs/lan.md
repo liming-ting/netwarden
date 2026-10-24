@@ -32,7 +32,9 @@ address (no packet is sent).
 Admin = `Handler.admin`: loopback (this computer's own browser), or a session redeemed
 from an ADMIN code (`ADMIN_POSTS` / `ADMIN_GETS`, plus `_local_client()` in the
 handlers): GET/POST `/api/settings`, `/api/ai/test`, `/api/check`,
-`/api/pair/new|revoke|revoke_all`, GET `/api/pair/sessions`, backup/restore, setup.
+`/api/pair/new|revoke|revoke_all`, GET `/api/pair/sessions`, backup/restore, setup, and
+every notification channel endpoint (`/api/channels*`, round 10: a viewer sees nothing
+about channels; [notifications.md](notifications.md)).
 An ordinary paired phone gets 403 there. `/api/meta`: `admin`, `admin_session` (an admin
 on another device) and `remote` = NOT admin (the page hides admin actions on it).
 

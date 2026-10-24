@@ -38,7 +38,7 @@ python3 -m http.server 8799 --bind 127.0.0.1 --directory /tmp/nw_root   # http:/
 6. `index.html` = `web.index_html("")` with relative asset URLs, `data-static-demo="1"`,
    `static/demo.js`, a CSP meta tag (`default-src 'none'`; scripts, styles, images and
    `connect-src` from `'self'` only - no other host can be reached), a description and
-   Open Graph / Twitter card tags (`og-image.png` = `docs/images/devices-desktop.png`,
+   Open Graph / Twitter card tags (`og-image.png` = `docs/images/social-preview.png`, 1280x640,
    absolute URL from `--site-url`), and `.nojekyll`.
 7. `privacy_scan()` before anything is written: the temp dir and DB path, the home
    directory, any home-directory-looking path, the build machine's own IP addresses

@@ -51,11 +51,32 @@ contain breaking changes).
   is scanned for the build machine's paths and addresses. Open Graph / Twitter card tags
   for link previews. `.github/workflows/pages.yml` (manual only) publishes it on GitHub
   Pages.
+- Opt-in push notifications (`docs/notifications.md`): ntfy, Gotify, Home Assistant (URL +
+  long-lived token), a JSON webhook with an optional HMAC-SHA256 signature, Discord, Slack,
+  Telegram (with a "find my chat id" helper), LINE Messaging API and Matrix. Per channel:
+  categories, minimum severity, privacy level (minimal / standard / detailed), language,
+  messages per hour (the excess is bundled into one message), an optional daily digest, and
+  urgent security alerts during quiet hours. A live preview shows the exact request; secrets
+  are write-only and never in an API answer, log, export, report or backup. Persistent
+  queue with retries (Retry-After honoured), delivery log, optional pinned certificate,
+  redirects never followed. Channels from `NETWARDEN_NOTIFY_<n>_*` environment variables.
+  Settings > Notifications, palette entries, `netwarden notify list | test NAME |
+  send-digest`, settings `push.digest_time` / `push.weekly_day`, admin-only
+  `/api/channels*`. The demo home has two paused example channels and never sends.
+  A saved token is only sent to the server it was entered for (changing a channel's host
+  asks for it again); below "detailed", every IPv4 / IPv6 / MAC form is masked; each
+  delivery has an 8-second total deadline.
 
 ### Changed
 
 - Several "While you were asleep" summaries name their night; Enter in a drawer field saves
   and keeps the focus there; Enter in the Devices filter opens the only match.
+- README (English and Traditional Chinese) rewritten for newcomers: live demo link, the
+  three ways to install with their shortest commands, what you need (and what works
+  without AdGuard Home / Pi-hole), a grouped feature list, exactly what can leave your
+  network and when, honest limitations. Screenshots refreshed from the current dashboard.
+- New `docs/images/social-preview.png` (1280x640), also used as the live demo's
+  link-preview image.
 
 ### Fixed
 

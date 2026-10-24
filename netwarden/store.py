@@ -357,6 +357,62 @@ CREATE TABLE IF NOT EXISTS quiet_summaries (
     seen_at     TEXT
 );
 
+-- Round 10 N: push notification channels (push.py, channels.py). config = non-secret
+-- fields + options (JSON); secrets = tokens / passwords / webhook URLs / HMAC secret
+-- (JSON): NEVER returned by an API, logged, exported, backed up or put in a report.
+-- source 'env' = defined by NETWARDEN_NOTIFY_<n>_* (its secrets stay in the environment).
+-- primed = 0: the next collect marks what is already there as not news.
+CREATE TABLE IF NOT EXISTS push_channels (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL UNIQUE,
+    type          TEXT NOT NULL,
+    enabled       INTEGER NOT NULL DEFAULT 0,
+    config        TEXT NOT NULL DEFAULT '{}',
+    secrets       TEXT NOT NULL DEFAULT '{}',
+    source        TEXT NOT NULL DEFAULT 'db',
+    primed        INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    last_ok_ts    TEXT,
+    last_error    TEXT,             -- an error CLASS (channels.ERROR_CLASSES), never a body
+    last_error_ts TEXT
+);
+-- One row per (channel, event key): the dedupe ledger and the delivery queue in one.
+-- state: queued | held (quiet hours, until = the window's end) | sent | failed |
+-- skipped (primed) | dropped (acked / muted / paused) | bundled (went into a summary).
+CREATE TABLE IF NOT EXISTS push_outbox (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id  INTEGER NOT NULL,
+    key         TEXT NOT NULL,
+    kind        TEXT NOT NULL,      -- alert | score | weekly | daily | summary | bundle
+    category    TEXT NOT NULL,
+    sev         INTEGER NOT NULL DEFAULT 3,
+    critical    INTEGER NOT NULL DEFAULT 0,
+    state       TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    next_at     TEXT,
+    until       TEXT,
+    win         TEXT,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    sent_at     TEXT,
+    data        TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (channel_id, key)
+);
+CREATE INDEX IF NOT EXISTS push_outbox_due ON push_outbox(channel_id, state, next_at);
+-- The delivery log a channel shows in Settings: time, what, ok or an error class.
+CREATE TABLE IF NOT EXISTS push_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id  INTEGER NOT NULL,
+    ts          TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    category    TEXT NOT NULL DEFAULT '',
+    ok          INTEGER NOT NULL,
+    error       TEXT,
+    status      INTEGER,
+    n           INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS push_log_channel ON push_log(channel_id, id);
+
 -- Stage M: phone pairing (pairing.py). Secrets are stored ONLY as SHA-256 hashes.
 -- A one-time code: 10 minutes, single use (used_at set atomically).
 CREATE TABLE IF NOT EXISTS pair_codes (
@@ -1705,6 +1761,10 @@ def prune(db: sqlite3.Connection, days: int, vacuum: bool = False) -> dict:
         # Stage Q: the notification ledger (a pending hold is kept until it is released)
         db.execute("DELETE FROM notify_log WHERE ts < ? AND state != 'held'", (cutoff,))
         db.execute("DELETE FROM quiet_summaries WHERE end_ts < ?", (cutoff,))
+        # Round 10 N: the push ledger (finished rows; the delivery log keeps its own cap)
+        db.execute("DELETE FROM push_outbox WHERE created_at < ? AND state NOT IN ('queued', 'held')",
+                   (cutoff,))
+        db.execute("DELETE FROM push_log WHERE ts < ?", (cutoff,))
         # Round 7 C: AI usage keeps its own, longer window (this month's totals + budget)
         keep = (datetime.now(timezone.utc) - timedelta(days=USAGE_KEEP_DAYS)) \
             .strftime("%Y-%m-%dT%H:%M:%S.%fZ")

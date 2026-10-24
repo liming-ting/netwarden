@@ -30,6 +30,8 @@ netwarden/
                     check_recorded() light ping; notify.route() = THE ONE notification gate
   quiet.py notify.py tuning.py explain.py hygiene.py  Stage Q: quiet hours (held -> ONE summary
                     per window); acks mute:|less:<kind>; "Why this alert?"; router hygiene
+  channels.py push.py  round 10 N: push adapters build()/preview()/send() (ONE network fn, no redirects, pin) |
+                    channels/outbox/log, collect() (notify loop) -> deliver() (push loop 15 s), render() (no LLM)
   inbox.py          Stage X: alerts + open suggestions in one queue; act() ack|mute|trust|snooze|dismiss|
                     done (+ undo), validated, <= 200 refs; a fixing suggestion rides on it as item.fix (_fixes)
   backup.py         netwarden-backup v1 (user notes only, no secrets/phones); validate/preview/restore merge|
@@ -104,7 +106,7 @@ scripts/  start.sh; start_windows.cmd (CRLF!) / start_demo_windows.cmd (:8788); 
           build_static_demo.py --out DIR [--quick] [--langs en,..] [--site-url] (W: GitHub Pages live demo)
 docs/     USER docs (English + .zh-TW where present): install, home_assistant, bandwidth (ntopng), pihole,
           private_ai (Ollama/LM Studio, redaction, settings API), lan (M), identification (N), family (F),
-          health (H), people (P), report (X); images/ = README screenshots (demo data only, 127.0.0.1:8799)
+          health (H), people (P), report (X); images/ = README shots (demo data, DPR 1, <300 KB) + social-preview.png (= og-image)
 docs/dev/ CONTRIBUTOR notes: stages (D1/D2/E2/F), stagex (X), stage_t (T), stagev3 (V3), stageq (Q), ai_tools (A),
           usability (U), accessibility (G), hardening (K), ha_addon (H), static_demo (W), bandwidth_investigation (why ntopng)
 root      README.md + README.zh-TW.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, CHANGELOG, THIRD_PARTY_NOTICES;
@@ -192,6 +194,10 @@ that PEER = HA admin; X-Ingress-Path/X-Forwarded-* read from it only. URLs are b
 relative manifest/css, sw.js scope): NEVER add a root-absolute URL to static/. Tests: tests/ingress_proxy.py.
 **Static demo (round 9 W)** - docs/dev/static_demo.md: `DEMO` in app.js ONLY with data-static-demo + static/demo.js (`NWDemo.file` = builder
 `static_name`, fixture-pinned); a NEW GET the page makes = add it to the builder (`PAGES`/`DEVICE_GETS`) or it 404s there; DEMO never POSTs.
+**Push (round 10 N)** - docs/notifications.md: tables push_channels (secrets column: NEVER in API/log/backup; log = shown_endpoint)
+/ push_outbox (UNIQUE(channel,key) = dedupe + queue; new/resumed channel PRIMED) / push_log; admin-only `web.PUSH_GETS|POSTS`;
+levels minimal|standard|detailed (scrub() + hashed id below detailed); env `NETWARDEN_NOTIFY_<n>_*` read-only (absent = row STALE, never
+deleted); a kept secret never goes to a new host (`push_reenter`); send() = one total deadline; demo DB never sends.
 
 ## Dev environment
 
@@ -209,10 +215,11 @@ python3 -m netwarden run --demo --offline-ai; bash scripts/start.sh [--demo]  # 
 python3 -m netwarden status [--json] | demo | prune --days 30 --vacuum | health [--json] [--rebuild DAYS]  # CLI lang zh-Hant
 python3 -m netwarden scan | ingest|traffic [--watch S] | alerts [--lang] [--json] | check --mac <mac>|--all | search tiktok | report
 python3 -m netwarden run --lan; pair [--local] [--admin] [--list|--revoke ID]; backup [-o F] | restore F [--mode merge|replace] [--dry-run]
+python3 -m netwarden notify list | test NAME | send-digest [--daily]   # push channels (round 10 N)
 NETWARDEN_HEADLESS=1 NETWARDEN_HOST=0.0.0.0|<lan-ip> python3 -m netwarden run   # container mode; --version
 bash scripts/adguard_dev.sh start; python3 scripts/dns_traffic.py   # DEV AdGuard (DNS :5354, API :3000); never for users
 python3 -m netwarden.web --db data/demo.db; python3 -m netwarden.alerts --db data/demo.db  # must work; perf_db.py / soak.py: perf
-python3 -m unittest discover -s tests          # 1282 tests, all must pass (+ node tests/js/*.js)
+python3 -m unittest discover -s tests          # 1322 tests, all must pass (+ node tests/js/*.js)
 ```
 Windows: `scripts\start_windows.cmd` (:8787) / `start_demo_windows.cmd` (:8788). Manual checks: own `--offline-ai` server on 127.0.0.1:8799, COPY of the demo DB.
 
@@ -228,8 +235,9 @@ ghcr.io/liming-ting/netwarden + netwarden-addon (lower case); AGPL-3.0-or-later 
 `netwarden.LICENSE|SOURCE_URL|COPYRIGHT` = ONE source; .gitattributes (LF; .cmd/.bat CRLF); images ONLY from v* tags after `smoke` +
 `tests`. Owner LAN values: read from CLAUDE.local.md at test time (test_round6_o). **CI1** (test_ci1.py): TZ=UTC + Asia/Taipei, job `tz`
 (`scripts/dev/tz_sweep.sh`); demo: one RNG per LOCAL day. Round 9 V (integrations), U (keyboard), X (report), W (static demo) + review
-fixes (palette = real modal: `.app`/drawer/chat inert while open; report "keep names" still masked): test_round9_*.py.
-**Next:** v0.1.0 (launch/release_checklist.md; live demo = step 16). Later: block_reason breakdown; HTTPS.
+fixes (palette = real modal: `.app`/drawer/chat inert while open; report "keep names" still masked): test_round9_*.py. Round 10 N push;
+P: both READMEs rewritten (say the same), launch/posts (HN + HA forum = notes only). Live demo LIVE but pages.yml is run BY HAND after UI changes.
+**Next:** next release (launch/release_checklist.md step 17). Later: block_reason breakdown; HTTPS.
 
 ## Conventions
 - stdlib only; plain, commented style of `discovery.py` / `dns_ingest.py`; new sources = `dns_ingest.Source`-like adapters.

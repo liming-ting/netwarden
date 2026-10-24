@@ -37,6 +37,7 @@ HEALTH_INTERVAL = 60         # gateway ping (nethealth)
 PRESENCE_INTERVAL = 60       # wake-up; the check itself runs every presence.check_minutes
 PRUNE_INTERVAL = 24 * 3600
 NOTIFY_INTERVAL = 60         # Stage Q: quiet hours hold / release (notify.run)
+PUSH_INTERVAL = 15           # round 10 N: send due push notifications (push.deliver)
 MAX_BACKOFF_FACTOR = 16      # a failing job waits at most 16x its interval
 WARM_LOOPS = ("dns", "traffic", "discovery")   # new data -> precompute the dashboard view
 
@@ -181,7 +182,15 @@ def plan(env: dict) -> dict:
     # hours hold what happens at night and the summary is made at the window's end even
     # while no dashboard is open. Local computation only; never the LLM.
     out["notify"] = (NOTIFY_INTERVAL, NotifyJob(env))
+    # Round 10 N: deliver queued push notifications (push.deliver) in their own loop, so
+    # a slow notification service never delays quiet hours or the dashboard
+    out["push"] = (PUSH_INTERVAL, lambda db: _push_deliver(db, env))
     return out
+
+
+def _push_deliver(db, env: dict):
+    from netwarden import push
+    return push.deliver(db, env)
 
 
 class NotifyJob:
@@ -194,8 +203,12 @@ class NotifyJob:
         self.checkpoint_at = time.monotonic()
 
     def __call__(self, db):
-        from netwarden import notify
+        from netwarden import notify, push
         res = notify.run(db, self.env)
+        try:   # Round 10 N: alerts -> the push queue (local DB writes only; push loop sends)
+            push.collect(db, self.env)
+        except Exception as e:  # noqa: BLE001 - never at the expense of quiet hours
+            log.warning("push: collect failed: %s", health.sanitize_error(e))
         if time.monotonic() - self.checkpoint_at >= self.CHECKPOINT_EVERY:
             self.checkpoint_at = time.monotonic()
             store.checkpoint(db)
@@ -294,6 +307,8 @@ class Runner:
     def start(self) -> "Runner":
         secrets = [self.env.get(k, "") for k in
                    (*dns_ingest.SECRET_KEYS, "NTOPNG_PASS", "NTOPNG_TOKEN", "ANTHROPIC_API_KEY")]
+        secrets += [v for k, v in self.env.items() if k.startswith("NETWARDEN_NOTIFY_")
+                    and k.endswith(("_TOKEN", "_PASSWORD", "_SECRET", "_URL"))]
         for name, (interval, job) in self.jobs.items():
             if interval is None:
                 self.skipped[name] = job

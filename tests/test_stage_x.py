@@ -204,7 +204,7 @@ class SettingsTests(_EmptyDB, unittest.TestCase):
     def test_sections_and_items(self):
         d = settings.describe(self.db, {}, "zh-Hant")
         self.assertEqual([s["key"] for s in d["sections"]],
-                         ["general", "alerts", "quiet", "ai", "usage", "family", "health", "phone"])
+                         ["general", "alerts", "quiet", "push", "ai", "usage", "family", "health", "phone"])
         keys = {s["key"] for s in d["sections"]}
         for it in d["items"]:
             self.assertIn(it["section"], keys)
@@ -563,7 +563,7 @@ class WebTests(unittest.TestCase):
     def test_settings_body_has_sections_and_connections(self):
         st, s = self.req("GET", "/api/settings?lang=ja")
         self.assertEqual(st, 200)
-        self.assertEqual(len(s["sections"]), 8)   # + Stage Q quiet hours, round 7 C AI usage
+        self.assertEqual(len(s["sections"]), 9)   # + Stage Q quiet hours, round 7 C AI usage, round 10 push
         self.assertEqual(set(s["connections"]["sources"]), set(conntest.SOURCES))
         self.assertTrue(s["demo"])
 

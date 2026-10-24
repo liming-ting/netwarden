@@ -45,6 +45,14 @@ your phone**, and click **Show pairing code**; scan the QR code with the phone (
 Wi-Fi). Plain HTTP: use it on a trusted home
 network only. Without `lan_access`, netwarden is reachable only through Home Assistant.
 
+## Notifications
+
+To get alerts in the Home Assistant app, open **Settings > Notifications** in the dashboard
+and add a **Home Assistant** channel with your HA URL (e.g.
+`http://homeassistant.local:8123`) and a long-lived access token (your HA profile >
+Security). The add-on keeps `homeassistant_api` off on purpose (it would give netwarden
+the whole Core API); why: https://github.com/liming-ting/netwarden/blob/main/docs/notifications.md#home-assistant-why-a-url-and-a-token
+
 ## What to expect
 
 - Discovery sees devices on the network Home Assistant's host is on. Devices behind

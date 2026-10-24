@@ -599,6 +599,71 @@ def cmd_report(argv) -> int:
     return 0
 
 
+# --- notify (round 10 N: push notification channels, for headless installs) ------
+
+def cmd_notify(argv) -> int:
+    """`notify list` | `notify test NAME` (one test message) | `notify send-digest
+    [--daily]` (queue a digest now and deliver it). Nothing is ever sent except by
+    `test` / `send-digest`; the weekly `alerts` cron command never sends anything."""
+    from netwarden import push
+    env = brain.load_env()
+    lang = _env_lang(env, argv)
+    ap = _parser("notify", lang)
+    ap.add_argument("action", choices=("list", "test", "send-digest"),
+                    help=i18n.t("cli.opt.notify_action", lang))
+    ap.add_argument("name", nargs="?", default=None, help=i18n.t("cli.opt.notify_name", lang))
+    ap.add_argument("--daily", action="store_true", help=i18n.t("cli.opt.notify_daily", lang))
+    ap.add_argument("--db", default=str(store.DEFAULT_DB), help=i18n.t("cli.opt.db", lang))
+    _opt_lang(ap, lang)
+    args = ap.parse_args(argv)
+    lang = i18n.normalize(args.lang or env.get("NETWARDEN_LANG"))
+    tr = lambda key, **kw: i18n.t("cli.notify." + key, lang, **kw)  # noqa: E731
+    db = store.connect(args.db)
+    try:
+        if args.action == "list":
+            chans = push.all_channels(db, env)
+            if not chans:
+                print(tr("none"))
+                return 0
+            for c in chans:
+                p = push.public(db, c, lang)
+                state = tr("env") if c["source"] == "env" else tr("on" if c["enabled"] else "paused")
+                last = p["error_text"] if p["last_error"] else (tr("last_ok", ts=c["last_ok_ts"][:16])
+                                                               if c["last_ok_ts"] else tr("never"))
+                print(tr("line", name=c["name"], type=i18n.t("push.type." + c["type"], lang),
+                         state=state, level=i18n.t("push.level." + c["level"], lang),
+                         endpoint=p["endpoint"] or "-", last=last))
+            return 0
+        if args.action == "test":
+            ch = push.by_name(db, env, args.name or "")
+            if ch is None:
+                print(tr("unknown", name=args.name or ""), file=sys.stderr)
+                return 1
+            try:
+                res = push.test(db, env, ch["id"])
+            except push.BadPush as e:
+                print(i18n.t("err." + e.code, lang), file=sys.stderr)
+                return 1
+            if res.ok:
+                print(tr("test_ok", name=ch["name"]))
+                return 0
+            print(tr("test_failed", name=ch["name"], error=i18n.t("push.err." + res.error, lang)),
+                  file=sys.stderr)
+            return 1
+        if store.is_demo(db):
+            print(i18n.t("err.push_demo", lang), file=sys.stderr)
+            return 1
+        n = push.enqueue_digest(db, env, "daily" if args.daily else "weekly")
+        if not n:
+            print(tr("no_digest_channel"))
+            return 0
+        sent = push.deliver(db, env)
+        print(tr("digest_sent", n=n, sent=sent))
+        return 0 if sent >= n else 1
+    finally:
+        db.close()
+
+
 # --- dispatch ----------------------------------------------------------------
 
 COMMANDS = {
@@ -619,6 +684,7 @@ COMMANDS = {
     "backup": cmd_backup,
     "restore": cmd_restore,
     "report": cmd_report,
+    "notify": cmd_notify,
 }
 
 
@@ -631,7 +697,8 @@ def usage(lang: str) -> str:
 
 
 LANG_COMMANDS = {"run", "web", "alerts", "demo", "status", "prune", "check", "search",
-                 "identify", "health", "pair", "backup", "restore", "report"}   # take --lang
+                 "identify", "health", "pair", "backup", "restore", "report",
+                 "notify"}   # take --lang
 
 
 def main(argv=None) -> int:

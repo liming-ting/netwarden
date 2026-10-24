@@ -134,6 +134,14 @@ class QuickBuild(unittest.TestCase):
                 self.assertNotIn("ANTHROPIC_API_KEY", sse)
                 self.assertNotIn("--offline-ai", sse)
             self.assertTrue(any(note in sse for sse in streams), lang)
+        for lang in ("en", "zh-Hant"):   # (round 10 fix) every demo channel's Delivery log
+            chans = json.loads(self.read(B.static_name("/api/channels?lang=" + lang)))["channels"]
+            self.assertTrue(chans)
+            for c in chans:
+                log = json.loads(self.read(B.static_name(f"/api/channels/log?id={c['id']}&lang={lang}")))
+                self.assertIsInstance(log["log"], list)
+            self.assertTrue(any(json.loads(self.read(B.static_name(
+                f"/api/channels/log?id={c['id']}&lang={lang}")))["log"] for c in chans), lang)
         loc = json.loads(self.read("demo-data/zh-Hant/api/locale.json"))
         self.assertIn("app.demo.banner", json.dumps(loc, ensure_ascii=False))
         self.assertGreater(self.stats["requests"], 50)

@@ -87,6 +87,15 @@ Home Assistant 的 Supervisor 把請求轉給附加元件。
 管理動作;也可以在同一張卡片撤銷。這是一般 HTTP(沒有加密):只在你信任的家用網路使用。
 用 Home Assistant App 或 Nabu Casa 的話,直接開側邊欄面板也可以。
 
+## 通知送到 Home Assistant App
+
+netwarden 可以透過 Home Assistant 的 notify 服務(`notify.mobile_app_<你的手機>`)把挑選過的警示
+傳到手機:到「**設定 > 通知**」新增一個 **Home Assistant** 頻道。它需要你的 HA 網址(例如
+`http://homeassistant.local:8123`)和一個**長期存取權杖**(HA 個人資料 > 安全性),因為附加元件
+刻意把 `homeassistant_api` 保持**關閉**:這個權限會讓它能使用整個 Home Assistant Core API,也會
+降低附加元件的安全評分。原因與權杖的用途見
+[notifications.zh-TW.md](notifications.zh-TW.md#home-assistant為什麼要填網址和權杖)。
+
 ## 附加元件能做什麼、不能做什麼
 
 - **網路存取:** 使用主機網路(`host_network`),探索功能(ARP 表、ping 掃描、mDNS /

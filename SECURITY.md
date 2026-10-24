@@ -32,7 +32,10 @@ In scope - things netwarden promises:
   the admin / loopback-only boundary, Host and Origin checks, Home Assistant ingress handling;
 - escaping of hostile text (device names, mDNS / SSDP / UPnP strings, owner and room names) in
   the dashboard, reports and CSV exports;
-- secrets: API keys or passwords appearing in API responses, logs, backups or the UI;
+- secrets: API keys or passwords appearing in API responses, logs, backups or the UI -
+  including notification channel tokens, webhook URLs and HMAC secrets;
+- notification channels sending more than their privacy level allows (an address or a
+  domain below "detailed"), following a redirect, or skipping TLS verification;
 - anything that sends data off the machine that the docs say stays local, or that changes the
   network although netwarden is documented as read-only;
 - AI redaction (`netwarden/redact.py`) leaking a name or address it is documented to hide;

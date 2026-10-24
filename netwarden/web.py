@@ -46,10 +46,10 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 
 import netwarden
-from netwarden import (activity, ai_intents, alerts, backup, bedtime, brain, cache, conntest, dashboard,
-                       devicetype, export, exposure, family_report, firstrun, health, hygiene,
-                       i18n, identify, inbox, live, localai, naming, nethealth, notify, pairing,
-                       people, presence, privacy, qr, report, runner, score, screentime, search,
+from netwarden import (activity, ai_intents, alerts, backup, bedtime, brain, cache, channels, conntest,
+                       dashboard, devicetype, export, exposure, family_report, firstrun, health,
+                       hygiene, i18n, identify, inbox, live, localai, naming, nethealth, notify,
+                       pairing, people, presence, privacy, push, qr, report, runner, score, screentime, search,
                        services, settings, since, store, suggestions, threatintel, timeline,
                        tuning, upnp, usage, visibility, weekly, wslnet)
 
@@ -109,10 +109,17 @@ PAGE_PATHS = ("/", "/index.html", "/report/weekly")   # -> 303 /pair without a s
 # Admin actions: from THIS computer's own browser, or with an admin session (round 6:
 # `pair --admin`, for headless installs); an ordinary paired phone gets 403.
 TEST_POSTS = tuple("/api/test/" + s for s in conntest.SOURCES)   # Stage X connection tests
+# Round 10 N: push notification channels (push.py) - add, edit, test, delete, preview:
+# admins only, like the settings; a viewer gets 403 and sees nothing about channels.
+PUSH_GETS = ("/api/channels", "/api/channels/log")
+PUSH_POSTS = ("/api/channels/save", "/api/channels/delete", "/api/channels/enable",
+              "/api/channels/preview", "/api/channels/test", "/api/channels/telegram",
+              "/api/channels/ha_services")
 ADMIN_POSTS = ("/api/settings", "/api/ai/test", "/api/check", "/api/pair/new",
                "/api/pair/revoke", "/api/pair/revoke_all", "/api/backup/preview",
-               "/api/restore", "/api/setup", "/api/setup/scan", *TEST_POSTS)
-ADMIN_GETS = ("/api/settings", "/api/pair/sessions", "/api/backup", "/api/setup/scan/status")
+               "/api/restore", "/api/setup", "/api/setup/scan", *TEST_POSTS, *PUSH_POSTS)
+ADMIN_GETS = ("/api/settings", "/api/pair/sessions", "/api/backup", "/api/setup/scan/status",
+              *PUSH_GETS)
 
 
 def static_file(name: str) -> tuple[bytes, str] | None:
@@ -974,6 +981,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             db = self._db()
             self._json(200, self._settings_body(db, lang))
+        elif path in PUSH_GETS:
+            # round 10 N: notification channels - admins only (viewers see nothing of them)
+            if not self._local_client():
+                return
+            db = self._db()
+            if path == "/api/channels":
+                self._json(200, push.describe(db, self.env, lang))
+                return
+            try:
+                cid = int((query.get("id") or [""])[0])
+            except ValueError:
+                cid = None
+            try:
+                self._json(200, {"log": push.history(db, self.env, cid, lang)})
+            except push.BadPush as e:
+                self._json(404, {"error": i18n.t("err." + e.code, lang), "field": e.field})
         else:
             self._error(404, "not_found", lang)
 
@@ -1581,6 +1604,10 @@ class Handler(BaseHTTPRequestHandler):
             self._tuning_post(db, path, payload, lang)
             return
 
+        if path in PUSH_POSTS:
+            self._push_post(db, path, payload, lang)
+            return
+
         if path in ("/api/inbox/act", "/api/backup/preview", "/api/restore", "/api/setup",
                     "/api/setup/scan") or path in TEST_POSTS:
             self._stage_x_post(db, path, payload, lang)
@@ -1886,6 +1913,84 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
         except tuning.BadTuning as e:
             raise BadRequest(e.code) from None
+
+    def _push_result(self, res, lang: str, **extra) -> dict:
+        """A send / helper Result for the page: ok, the error CLASS + its plain-language
+        sentence (what happened and what to do). Never an answer body or a token."""
+        out = {"ok": res.ok, "error": res.error or None, "status": res.status, **extra}
+        if not res.ok:
+            out["error_text"] = i18n.t("push.err." + res.error, lang)
+        return out
+
+    def _push_post(self, db, path: str, payload: dict, lang: str):
+        """Round 10 N: POST /api/channels/* (admins only: ADMIN_POSTS + this second lock).
+        save {id?, name, type, fields, secrets, options..., confirm?} | delete {id} |
+        enable {id, enabled} | preview {draft..., sample} (never contacts anything) |
+        test {id} (ONE message, on an explicit click) | telegram {id? | secrets.token}
+        (getUpdates: find the chat id) | ha_services {id? | fields.url, secrets.token}."""
+        if not self._local_client():
+            return
+        try:
+            if path == "/api/channels/save":
+                cid = push.save(db, self.env, payload)
+                ch = push.get(db, self.env, cid)
+                log.info("notification channel saved: %s (%s)", ch["type"],
+                         channels.shown_endpoint(ch["type"], ch["fields"], ch["secrets"]))
+                self._json(200, {"ok": True, "id": cid, **push.describe(db, self.env, lang)})
+            elif path == "/api/channels/delete":
+                push.delete(db, self.env, payload.get("id"))
+                self._json(200, {"ok": True, **push.describe(db, self.env, lang)})
+            elif path == "/api/channels/enable":
+                push.set_enabled(db, self.env, payload.get("id"), payload.get("enabled"))
+                self._json(200, {"ok": True, **push.describe(db, self.env, lang)})
+            elif path == "/api/channels/preview":
+                sample = payload.get("sample") or "alert"
+                if not isinstance(sample, str):
+                    raise push.BadPush("bad_json", "sample")
+                self._json(200, push.preview(db, self.env, payload.get("channel") or {}, sample))
+            elif store.is_demo(db):
+                # the demo home's channels point at .invalid hosts: nothing is ever sent
+                self._json(409, {"error": i18n.t("err.push_demo", lang), "demo": True})
+            elif path == "/api/channels/test":
+                res = push.test(db, self.env, payload.get("id"))
+                self._json(200, self._push_result(res, lang))
+            elif path == "/api/channels/telegram":
+                token = self._push_secret(db, payload, "token", "telegram")
+                res, chats = channels.telegram_chats(token)
+                self._json(200, self._push_result(res, lang, chats=chats))
+            else:   # /api/channels/ha_services
+                old = push.get(db, self.env, payload["id"]) if payload.get("id") is not None else None
+                if old and old["type"] != "homeassistant":
+                    raise push.BadPush("push_type", "type")
+                f = {**((old or {}).get("fields") or {}), **(payload.get("fields") or {})} \
+                    if isinstance(payload.get("fields") or {}, dict) else {}
+                spec = {x.name: x for x in channels.fields("homeassistant")}
+                url = channels.clean_field("homeassistant", spec["url"], f.get("url"))
+                pin = channels.clean_field("homeassistant", spec["pin"], f.get("pin") or "")
+                token = self._push_secret(db, payload, "token", "homeassistant")
+                if old:   # a saved token only goes to the server it was saved for
+                    push.no_secret_to_new_host("homeassistant", old, {"url": url}, {"token": token},
+                                                payload.get("secrets") or {})
+                res, names = channels.ha_services(url, token, pin)
+                self._json(200, self._push_result(res, lang, services=names))
+        except push.BadPush as e:
+            self._json(400, {"error": i18n.t("err." + e.code, lang), "code": e.code, "field": e.field})
+        except channels.BadChannel as e:
+            self._json(400, {"error": i18n.t("err." + e.code, lang), "code": e.code, "field": e.field})
+
+    def _push_secret(self, db, payload: dict, name: str, ctype: str) -> str:
+        """A helper's credential: typed into the draft, or the saved channel's."""
+        secrets = payload.get("secrets") or {}
+        if not isinstance(secrets, dict):
+            raise push.BadPush("bad_json")
+        raw = secrets.get(name)
+        if raw is None and payload.get("id") is not None:
+            old = push.get(db, self.env, payload["id"])
+            if old["type"] != ctype:
+                raise push.BadPush("push_type", "type")
+            raw = old["secrets"].get(name, "")
+        spec = {x.name: x for x in channels.fields(ctype)}[name]
+        return channels.clean_field(ctype, spec, raw or "")
 
     def _stage_x_post(self, db, path: str, payload: dict, lang: str):
         """Stage X: inbox actions (anyone signed in); backup preview / restore, connection

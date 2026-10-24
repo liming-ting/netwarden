@@ -191,7 +191,7 @@ SAME_OK = {
 }
 # Keys whose value is a brand / code / format in every language (by prefix or exact key).
 SAME_OK_KEYS = ("_meta", "svc.", "threat.", "tracker.", "brand.", "list_sep", "digest.sep",
-                "devtype.", "cat.")
+                "devtype.", "cat.", "push.type.")
 _PH = None
 
 

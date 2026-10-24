@@ -1044,6 +1044,62 @@ def _seed_tuning(db, now: datetime) -> None:
     store.set_meta(db, "demo_tuning", "1")
 
 
+# Round 10 N: two PAUSED example notification channels on .invalid hosts (the demo home
+# never sends: push.collect / deliver / test refuse a demo DB) + a synthetic delivery log.
+DEMO_PUSH = (
+    ("Phone (ntfy)", "ntfy", {"url": "https://ntfy.home.invalid", "topic": "netwarden-demo"}, {},
+     {"level": "standard", "categories": ["security", "devices", "health"], "daily": True}),
+    ("Kitchen tablet (Gotify)", "gotify", {"url": "http://gotify.home.invalid:8080"},
+     {"token": "demo-not-a-real-token"},
+     {"level": "minimal", "categories": ["security", "family"], "min_sev": 1}),
+)
+# (channel index, hours ago, kind, category, ok, error class, http status, messages)
+DEMO_PUSH_LOG = (
+    (0, 50, "test", "test", 1, None, 200, 1), (0, 30, "alert", "devices", 1, None, 200, 1),
+    (0, 26, "daily", "digest", 1, None, 200, 1), (0, 9, "summary", "security", 1, None, 200, 3),
+    (0, 3, "alert", "health", 0, "http_5xx", 502, 1), (0, 2, "alert", "health", 1, None, 200, 1),
+    (1, 40, "test", "test", 0, "http_401", 401, 1), (1, 39, "test", "test", 1, None, 200, 1),
+    (1, 8, "alert", "security", 1, None, 200, 1),
+)
+
+
+def _seed_push(db, now: datetime) -> None:
+    """The channels: inserted once per demo DB (an edited or deleted one stays the user's
+    choice). Their delivery log is synthetic and rewritten on every build, relative to now."""
+    if store.get_meta(db, "demo_push") != "1":
+        with db:
+            ids = []
+            for name, ctype, fields, secrets, opts in DEMO_PUSH:
+                if db.execute("SELECT 1 FROM push_channels WHERE name = ?", (name,)).fetchone():
+                    ids.append(None)
+                    continue
+                cfg = json.dumps({"fields": fields, **opts, "confirmed": False})
+                cur = db.execute("""INSERT INTO push_channels (name, type, enabled, primed, config, secrets,
+                                        source, created_at, updated_at) VALUES (?, ?, 0, 0, ?, ?, 'db', ?, ?)""",
+                                 (name, ctype, cfg, json.dumps(secrets), _utc(now - timedelta(days=3)),
+                                  _utc(now - timedelta(days=3))))
+                ids.append(cur.lastrowid)
+        store.set_meta(db, "demo_push_ids", ",".join(str(i or "") for i in ids))
+        store.set_meta(db, "demo_push", "1")
+    ids = [int(x) if x else None for x in (store.get_meta(db, "demo_push_ids") or "").split(",")]
+    with db:
+        for i, cid in enumerate(ids):
+            if cid is None or not db.execute("SELECT 1 FROM push_channels WHERE id = ?", (cid,)).fetchone():
+                continue
+            db.execute("DELETE FROM push_log WHERE channel_id = ?", (cid,))
+            last_ok = last_err = None
+            for (ci, hours, kind, cat, ok, err, status, n) in DEMO_PUSH_LOG:
+                if ci != i:
+                    continue
+                ts = _utc(now - timedelta(hours=hours))
+                db.execute("INSERT INTO push_log (channel_id, ts, kind, category, ok, error, status, n) "
+                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (cid, ts, kind, cat, ok, err, status, n))
+                last_ok, last_err = (ts, None) if ok else (last_ok, (err, ts))
+            db.execute("UPDATE push_channels SET last_ok_ts = ?, last_error = ?, last_error_ts = ? "
+                       "WHERE id = ?", (last_ok, last_err[0] if last_err else None,
+                                        last_err[1] if last_err else None, cid))
+
+
 def _seed_quiet(db, now: datetime, tz) -> None:
     """Quiet hours on, plus last night's "while you were asleep" summary - written once
     per demo DB, the way notify.release() would have (the held events marked released,
@@ -1339,6 +1395,7 @@ def build(path: Path = DEMO_DB, now: datetime | None = None) -> dict:
     _seed_settings(db)
     _seed_tuning(db, now)
     _seed_quiet(db, now, tz)
+    _seed_push(db, now)
     _seed_seen(db, now, tz)
     build_score_history(db, now, tz)
     build_ai_usage(db, now, tz)

@@ -189,12 +189,18 @@ class NothingPrivate(unittest.TestCase):
         self.assertGreaterEqual(len(shots), 3)
         readmes = (ROOT / "README.md").read_text(encoding="utf-8") + \
             (ROOT / "README.zh-TW.md").read_text(encoding="utf-8")
+        # the social preview is not a README picture: GitHub's repository card + the live
+        # demo's link preview (og-image.png)
+        users = readmes + (ROOT / "scripts" / "build_static_demo.py").read_text(encoding="utf-8")
         for rel in shots:
             data = (ROOT / rel).read_bytes()
             self.assertTrue(data.startswith(b"\x89PNG\r\n\x1a\n"), rel)
             self.assertLess(len(data), 300_000, rel)
             self.assertNotIn(b"tEXt", data[:4096], rel)       # no embedded text metadata
-            self.assertIn(rel, readmes)
+            self.assertIn(rel.rsplit("/", 1)[1] if rel.endswith("social-preview.png") else rel, users)
+        social = (ROOT / "docs" / "images" / "social-preview.png").read_bytes()
+        self.assertEqual((int.from_bytes(social[16:20], "big"), int.from_bytes(social[20:24], "big")),
+                         (1280, 640))                         # GitHub's recommended size
 
 
 # --- docs ---------------------------------------------------------------------------------

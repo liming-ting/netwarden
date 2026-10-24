@@ -153,6 +153,8 @@ const S = {
   // Stage X: inbox triage, settings page, first-run wizard, the confirm sheet
   inbox: { sel: 0, picked: new Set(), gone: new Set(), undo: [] },
   set: { form: {}, saving: null, errs: {}, tests: {}, testing: {}, bk: null },
+  // round 10 N: notification channels (Settings): list, editor draft, preview, test results, logs
+  push: { d: null, err: null, ed: null, pv: null, pvErr: null, busy: {}, res: {}, log: {}, logOpen: null },
   setup: { s: null, err: null, step: null, scan: null, test: null, tz: null },
   confirm: { open: false },
   // Stage P: people cards / one person, the person form, the device picker's query, and the
@@ -2986,7 +2988,7 @@ function confirmCheck() {
 // Stage X - Settings: every registered setting, grouped (GET /api/settings: value, where it
 // comes from, help); a value set in .env is read-only and names its variable; secrets are
 // only ever "configured". Plus connection tests and backup / restore (this computer only).
-const SET_ICON = { general: 'i-sliders', alerts: 'i-bell', quiet: 'i-moon', ai: 'i-spark', usage: 'i-gauge', family: 'i-family', health: 'i-wifi', phone: 't-phone' };
+const SET_ICON = { general: 'i-sliders', alerts: 'i-bell', quiet: 'i-moon', push: 'i-bell', ai: 'i-spark', usage: 'i-gauge', family: 'i-family', health: 'i-wifi', phone: 't-phone' };
 const CONN = ['adguard', 'pihole', 'ntopng', 'ai'];
 const setId = k => 'set-' + k.replace(/[^\w]/g, '-');
 function setItems(sec) { return ((S.ai.s && S.ai.s.items) || []).filter(i => i.section === sec && !i.secret); }
@@ -3003,7 +3005,8 @@ function setControl(it) {
       <span class="muted">${T(v ? 'app.set.on' : 'app.set.off')}</span></div>`;
   }
   if (it.type === 'choice') {
-    const name = c => (it.key === 'ui.language' ? ((S.meta.languages || []).find(l => l.code === c) || { name: c }).name : c);
+    const name = c => (it.key === 'ui.language' ? ((S.meta.languages || []).find(l => l.code === c) || { name: c }).name
+      : it.key === 'push.weekly_day' ? T('act.wd.' + c) : c);
     return html`<select id="${id}" data-set="${it.key}"${desc}${dis}>${(it.choices || []).map(c => html`<option value="${c}"${c === v ? ' selected' : ''}>${name(c)}</option>`)}</select>`;
   }
   if (it.type === 'int') {
@@ -3156,7 +3159,7 @@ function backupCard() {
       <a class="btn ghost" href="${url('/api/backup')}" download data-act="bk-download">${icon('i-download')}${T('app.bk.download')}</a>
       <label class="btn ghost file-btn">${icon('i-box')}<span>${T('app.bk.choose')}</span><input type="file" id="bk-file" class="sr" accept=".json,application/json" data-bk-file></label>
     </div>
-    <p class="hint">${T('app.bk.what')}</p>
+    <p class="hint">${T('app.bk.what')} ${T('app.push.backup_note')}</p>
     ${pv}` });
 }
 async function bkLoad(file) {
@@ -3189,6 +3192,255 @@ function bkApply() {
   if (B.mode === 'replace') openConfirm({ title: T('app.bk.replace_title'), text: T('app.bk.replace_text'), ok: T('app.bk.restore'), danger: true, run });
   else run();
 }
+// ---------------------------------------------------------------------------------------
+// Round 10 N - Notifications: push channels (GET /api/channels, admins only). Off until the
+// user adds one; a new channel starts paused. Credentials are write-only: the page only
+// ever learns "set" / "not set" and the endpoint's scheme + host. The editor shows the
+// EXACT request for a sample (POST /api/channels/preview, never sends); "Send test" is the
+// only thing that sends, one message, on a click.
+const PUSH_SAMPLES = ['alert', 'test', 'weekly', 'daily'];
+const PUSH_SEV = ['critical', 'high', 'medium', 'low'];
+let pushPvTimer = null;
+async function loadPush() {
+  if (!S.meta || S.meta.remote) return;
+  try { S.push.d = await getJSON('/api/channels'); S.push.err = null; } catch (e) { S.push.err = errText(e); }
+  render();
+}
+function pushType(t) { return ((S.push.d && S.push.d.types) || []).find(x => x.type === t); }
+function pushNew(type) {
+  const ty = pushType(type); if (!ty) return;
+  S.push.ed = { id: null, type, name: ty.name, fields: {}, secrets: {}, clear: {}, level: 'standard', language: '',
+                categories: ['security', 'devices', 'health'], min_sev: 3, quiet_bypass: true, rate: 10, daily: false,
+                confirm: false, errs: {}, err: null, saving: false, sample: 'alert', helper: null };
+  S.push.pv = null; render(); pushPreview();
+  const f = $('#push-ed-name'); if (f) f.focus();
+}
+function pushEdit(id) {
+  const c = ((S.push.d && S.push.d.channels) || []).find(x => x.id === id); if (!c || !c.editable) return;
+  S.push.ed = { id, type: c.type, name: c.name, fields: Object.assign({}, c.fields), secrets: {}, clear: {}, level: c.level,
+                language: c.lang || '', categories: c.categories.slice(), min_sev: c.min_sev, quiet_bypass: c.quiet_bypass,
+                rate: c.rate, daily: c.daily, confirm: false, errs: {}, err: null, saving: false, sample: 'alert', helper: null };
+  S.push.pv = null; render(); pushPreview();
+  const f = $('#push-ed-name'); if (f) f.focus();
+}
+// what the server gets: typed secrets only (left empty = keep), null = clear
+function pushPayload() {
+  const E = S.push.ed, secrets = {};
+  Object.keys(E.secrets).forEach(k => { if (E.secrets[k]) secrets[k] = E.secrets[k]; });
+  Object.keys(E.clear).forEach(k => { if (E.clear[k]) secrets[k] = null; });
+  const p = { name: E.name, fields: E.fields, secrets, level: E.level, language: E.language, categories: E.categories,
+              min_sev: +E.min_sev, quiet_bypass: !!E.quiet_bypass, rate: +E.rate || 10, daily: !!E.daily };
+  if (E.id) p.id = E.id; else p.type = E.type;
+  if (E.confirm) p.confirm = true;
+  return p;
+}
+function pushPreview(now) {
+  clearTimeout(pushPvTimer);
+  if (DEMO) return;   // the static demo: nothing to ask
+  pushPvTimer = setTimeout(async () => {
+    const E = S.push.ed; if (!E) return;
+    try { S.push.pv = await postJSON('/api/channels/preview', { channel: pushPayload(), sample: E.sample }); S.push.pvErr = null; }
+    catch (e) { S.push.pvErr = errText(e); }
+    if (S.push.ed === E) render();
+  }, now ? 0 : 350);
+}
+function pushPvText(pv) {
+  const r = pv.request;
+  return r.method + ' ' + r.url + '\n' + Object.keys(r.headers).map(k => k + ': ' + r.headers[k]).join('\n') + '\n\n' + r.body;
+}
+async function pushSave() {
+  const E = S.push.ed; if (!E || E.saving) return;
+  E.saving = true; E.errs = {}; E.err = null; render();
+  try {
+    S.push.d = await postJSON('/api/channels/save', pushPayload());
+    S.push.ed = null; S.push.pv = null;
+    toast(T(E.id ? 'app.push.saved' : 'app.push.created'));
+  } catch (e) {
+    const f = e.body && e.body.field;
+    if (f) E.errs[f] = errText(e); else E.err = errText(e);
+    E.saving = false;
+  }
+  render();
+  if (!S.push.ed) { const h = $('[data-key="set-push"] h2'); if (h) { h.setAttribute('tabindex', '-1'); h.focus(); } }
+}
+async function pushAct(path, body, done) {
+  try { S.push.d = await postJSON(path, body); if (done) toast(done); } catch (e) { fail(e); }
+  render();
+}
+async function pushTest(id) {
+  if (S.push.busy[id]) return;
+  S.push.busy[id] = true; S.push.res[id] = null; render();
+  try { S.push.res[id] = await postJSON('/api/channels/test', { id }); speak(S.push.res[id].ok ? T('app.push.test_ok') : S.push.res[id].error_text); }
+  catch (e) { S.push.res[id] = { ok: false, error_text: errText(e) }; }
+  S.push.busy[id] = false;
+  loadPush();
+}
+async function pushLog(id) {
+  if (S.push.logOpen === id) { S.push.logOpen = null; render(); return; }
+  S.push.logOpen = id; render();
+  await pushLogLoad(id);
+}
+async function pushLogLoad(id) {
+  try { S.push.log[id] = (await getJSON('/api/channels/log?id=' + id)).log; } catch (e) { S.push.log[id] = null; fail(e); }
+  render();
+}
+function pushDelete(id, name) {
+  openConfirm({ icon: 'i-alert', title: T('app.push.delete_title', { name }), text: T('app.push.delete_text'), ok: T('app.push.delete'),
+                danger: true, run: () => pushAct('/api/channels/delete', { id }, T('app.push.deleted')) });
+}
+async function pushHelper(kind) {
+  const E = S.push.ed; if (!E) return;
+  E.helper = { kind, busy: true }; render();
+  const body = { secrets: {} };
+  if (E.id) body.id = E.id;
+  if (E.secrets.token) body.secrets.token = E.secrets.token;
+  if (kind === 'ha') body.fields = { url: E.fields.url || '', pin: E.fields.pin || '' };
+  try {
+    const r = await postJSON(kind === 'tg' ? '/api/channels/telegram' : '/api/channels/ha_services', body);
+    E.helper = { kind, items: kind === 'tg' ? r.chats : r.services, err: r.ok ? null : r.error_text };
+  } catch (e) { E.helper = { kind, items: [], err: errText(e) }; }
+  render();
+}
+function pushStatus(c) {
+  if (c.source === 'env') return html`<span class="tag" title="${T('app.push.env_hint', { prefix: S.push.d.env_prefix + c.env_slot + '_' })}">${icon('i-sliders')}${T('app.push.env')}</span>`;
+  return html`<span class="tag ${c.enabled ? 'tag-ok' : 'tag-warn'}">${T(c.enabled ? 'app.push.on' : 'app.push.paused')}</span>`;
+}
+function pushLast(c) {
+  if (c.last_error) return html`<p class="hint bad push-err">${icon('i-alert')} ${c.error_text} <span class="muted">(${fmt.rel(c.last_error_ts)})</span></p>`;
+  return html`<span class="hint">${c.last_ok_ts ? T('app.push.last_ok', { when: fmt.rel(c.last_ok_ts) }) : T('app.push.never')}</span>`;
+}
+function pushLogTable(c) {
+  const rows = S.push.log[c.id];
+  if (!rows) return html`<p class="hint">${T('ui.loading')}</p>`;
+  if (!rows.length) return html`<p class="hint">${T('app.push.log_empty')}</p>`;
+  return html`<div class="tbl-wrap"><table class="tbl push-log"><caption class="sr">${T('app.push.log_title', { name: c.name })}</caption>
+    <thead><tr><th scope="col">${T('app.push.col_time')}</th><th scope="col">${T('app.push.col_what')}</th><th scope="col">${T('app.push.col_result')}</th></tr></thead>
+    <tbody>${rows.map((r, i) => html`<tr data-key="${i}"><td>${fmt.date(r.ts)}</td><td>${T('app.push.what.' + r.kind)}${r.n > 1 ? html` <span class="muted">(${fmt.num(r.n)})</span>` : ''}</td>
+      <td>${r.ok ? html`<span class="tag tag-ok">${icon('i-check')}${T('app.push.delivered')}</span>` : html`<span class="tag tag-bad">${r.error}</span> <span class="hint">${r.text}</span>`}</td></tr>`)}</tbody></table></div>`;
+}
+function pushRow(c) {
+  const ty = pushType(c.type) || { name: c.type }, r = S.push.res[c.id], busy = !!S.push.busy[c.id];
+  return html`<li class="push-row" data-key="${c.id}">
+    <div class="push-h"><b>${c.name}</b><span class="tag">${ty.name}</span>${pushStatus(c)}<span class="tag">${T('push.level.' + c.level)}</span>
+      ${c.hosted ? html`<span class="tag tag-warn" title="${T('app.push.hosted_note', { service: ty.name })}">${T('app.push.hosted')}</span>` : ''}</div>
+    <div class="push-m"><span class="mono">${c.endpoint || '—'}</span> · ${pushLast(c)}${c.waiting ? html` · <span class="hint">${T('app.push.waiting', { n: fmt.num(c.waiting) })}</span>` : ''}</div>
+    <div aria-live="polite">${busy ? html`<span class="muted">${T('app.push.testing')}</span>` : r ? (r.ok ? html`<span class="tag tag-ok">${icon('i-check')}${T('app.push.test_ok')}</span>`
+      : html`<p class="hint bad">${icon('i-alert')} ${r.error_text}</p>`) : ''}</div>
+    <div class="ai-acts">
+      <button type="button" class="btn sm ghost" data-act="push-test" data-id="${c.id}"${busy || S.push.d.demo ? ' disabled' : ''}>${icon('i-pulse')}${T('app.push.test')}</button>
+      ${c.editable ? html`<button type="button" class="btn sm ghost" data-act="push-edit" data-id="${c.id}">${icon('i-edit')}${T('app.push.edit')}</button>
+        <button type="button" class="btn sm ghost" data-act="push-enable" data-id="${c.id}" data-v="${c.enabled ? '0' : '1'}">${T(c.enabled ? 'app.push.pause' : 'app.push.resume')}</button>` : ''}
+      <button type="button" class="btn sm ghost" data-act="push-log" data-id="${c.id}" aria-expanded="${String(S.push.logOpen === c.id)}">${T('app.push.log')}</button>
+      ${c.editable ? html`<button type="button" class="btn sm ghost danger" data-act="push-delete" data-id="${c.id}" data-name="${c.name}">${T('app.push.delete')}</button>` : ''}
+    </div>
+    ${S.push.logOpen === c.id ? pushLogTable(c) : ''}</li>`;
+}
+function pushField(f) {
+  const E = S.push.ed, id = 'push-f-' + f.name, err = E.errs[f.name];
+  const c = E.id && ((S.push.d.channels || []).find(x => x.id === E.id) || {}), set = !!(c && c.secrets && c.secrets[f.name]);
+  const secret = f.kind.indexOf('secret') === 0;
+  const req = f.required ? html` <span class="muted">*</span>` : '';
+  let ctl;
+  if (secret) {
+    ctl = html`<input type="password" id="${id}" data-push-s="${f.name}" value="${E.secrets[f.name] || ''}" maxlength="4096" autocomplete="new-password" spellcheck="false"
+      placeholder="${set ? T('app.push.keep') : f.placeholder}" aria-describedby="${id}-h"${E.clear[f.name] ? ' disabled' : ''}>`;
+  } else {
+    ctl = html`<input type="text" id="${id}" data-push-f="${f.name}" value="${E.fields[f.name] || ''}" maxlength="${f.max > 300 ? 500 : f.max}" autocomplete="off" spellcheck="false"
+      placeholder="${f.placeholder}" aria-describedby="${id}-h">`;
+  }
+  return html`<div class="field set-field${err ? ' invalid' : ''}" data-key="${f.name}">
+    <div class="set-l"><label for="${id}">${f.label}${req}</label>${secret ? html`<span class="tag${set && !E.clear[f.name] ? ' tag-ok' : ''}">${T(set && !E.clear[f.name] ? 'app.push.set' : 'app.push.not_set')}</span>` : ''}</div>
+    ${ctl}
+    ${err ? html`<span class="hint bad" role="alert">${icon('i-alert')} ${err}</span>` : ''}
+    <span class="hint" id="${id}-h">${secret ? T('app.push.secret_hint') : f.name === 'pin' ? T('app.push.pin_hint') : ''}
+      ${secret && set && !f.required ? html` <button type="button" class="btn sm quiet" data-act="push-clear" data-k="${f.name}" aria-pressed="${String(!!E.clear[f.name])}">${T(E.clear[f.name] ? 'app.push.undo_clear' : 'app.push.clear')}</button>` : ''}</span></div>`;
+}
+function pushSwitch(k, label, hint) {
+  const E = S.push.ed, id = 'push-o-' + k;
+  return html`<div class="field set-field" data-key="${k}"><div class="set-l"><span id="${id}-l">${label}</span></div>
+    <div class="toggle-row"><button type="button" class="switch" role="switch" id="${id}" aria-checked="${String(!!E[k])}" aria-labelledby="${id}-l" aria-describedby="${id}-h" data-act="push-bool" data-k="${k}"><i></i></button>
+      <span class="muted">${T(E[k] ? 'app.set.on' : 'app.set.off')}</span></div><span class="hint" id="${id}-h">${hint}</span></div>`;
+}
+function pushHelperBox() {
+  const E = S.push.ed, H = E.helper;
+  if (E.type !== 'telegram' && E.type !== 'homeassistant') return '';
+  const kind = E.type === 'telegram' ? 'tg' : 'ha';
+  let res = '';
+  if (H && H.kind === kind) {
+    if (H.busy) res = html`<span class="muted">${T('ui.loading')}</span>`;
+    else if (H.err) res = html`<p class="hint bad">${icon('i-alert')} ${H.err}</p>`;
+    else if (!H.items.length) res = html`<p class="hint">${T(kind === 'tg' ? 'app.push.tg_none' : 'app.push.ha_none')}</p>`;
+    else res = html`<ul class="plain push-pick">${H.items.map((x, i) => (kind === 'tg'
+      ? html`<li data-key="${i}"><button type="button" class="btn sm ghost" data-act="push-use" data-k="chat_id" data-v="${x.id}">${x.title || x.id} <span class="muted mono">${x.id}</span></button></li>`
+      : html`<li data-key="${i}"><button type="button" class="btn sm ghost" data-act="push-use" data-k="service" data-v="${x}"><span class="mono">notify.${x}</span></button></li>`))}</ul>`;
+  }
+  return html`<div class="push-helper"><button type="button" class="btn sm ghost" data-act="push-helper" data-v="${kind}">${icon('i-search')}${T(kind === 'tg' ? 'app.push.tg_find' : 'app.push.ha_list')}</button>
+    <span class="hint">${T(kind === 'tg' ? 'app.push.tg_find_hint' : 'app.push.ha_list_hint')}</span><div aria-live="polite">${res}</div></div>`;
+}
+function pushEditor() {
+  const E = S.push.ed, ty = pushType(E.type), pv = S.push.pv, cats = S.push.d.categories;
+  const cloud = pv && pv.destination === 'cloud';
+  const langs = S.meta.languages || [];
+  return html`<form class="set-form push-ed" data-push-form novalidate aria-labelledby="push-ed-h" data-key="ed">
+    <h3 id="push-ed-h">${T(E.id ? 'app.push.edit_title' : 'app.push.add_title', { type: ty.name })}</h3>
+    <p class="hint">${ty.help} <a href="${ty.docs}" target="_blank" rel="noopener noreferrer" aria-label="${T('app.push.docs')} (${T('app.about.new_tab')})">${T('app.push.docs')}</a></p>
+    ${ty.hosted ? html`<p class="push-note warn" role="note">${icon('i-globe')}<span>${T('app.push.hosted_note', { service: ty.name })}</span></p>` : ''}
+    ${E.err ? html`<p class="hint bad" role="alert">${icon('i-alert')} ${E.err}</p>` : ''}
+    <div class="field set-field${E.errs.name ? ' invalid' : ''}" data-key="name"><div class="set-l"><label for="push-ed-name">${T('app.push.name')}</label></div>
+      <input type="text" id="push-ed-name" data-push="name" value="${E.name}" maxlength="40" autocomplete="off">
+      ${E.errs.name ? html`<span class="hint bad" role="alert">${icon('i-alert')} ${E.errs.name}</span>` : ''}</div>
+    ${ty.fields.map(pushField)}
+    ${pushHelperBox()}
+    <div class="field set-field${E.errs.level ? ' invalid' : ''}" data-key="level"><span id="push-lvl-l">${T('app.push.level')}</span>
+      <div class="seg" role="group" aria-labelledby="push-lvl-l">${S.push.d.levels.map(l => html`<button type="button" data-act="push-level" data-v="${l}" aria-pressed="${String(E.level === l)}">${T('push.level.' + l)}</button>`)}</div>
+      <span class="hint">${T('push.level_help.' + E.level)}</span>
+      ${E.level === 'detailed' && cloud ? html`<label class="check"><input type="checkbox" id="push-ed-confirm" data-push-confirm${E.confirm ? ' checked' : ''}> ${T('app.push.confirm_detailed')}</label>` : ''}
+      ${E.errs.level ? html`<span class="hint bad" role="alert">${icon('i-alert')} ${E.errs.level}</span>` : ''}</div>
+    <fieldset class="field push-cats" data-key="cats"><legend>${T('app.push.categories')}</legend>
+      ${cats.map(c => html`<label class="check" data-key="${c}"><input type="checkbox" id="push-cat-${c}" data-push-cat="${c}"${E.categories.includes(c) ? ' checked' : ''}> ${T('push.cat.' + c)}</label>`)}</fieldset>
+    <div class="push-grid">
+      <div class="field set-field" data-key="min_sev"><div class="set-l"><label for="push-o-sev">${T('app.push.min_sev')}</label></div>
+        <select id="push-o-sev" data-push="min_sev">${PUSH_SEV.map((s, i) => html`<option value="${i}"${+E.min_sev === i ? ' selected' : ''}>${T('push.sev.' + s)}</option>`)}</select></div>
+      <div class="field set-field" data-key="language"><div class="set-l"><label for="push-o-lang">${T('app.push.language')}</label></div>
+        <select id="push-o-lang" data-push="language"><option value=""${E.language ? '' : ' selected'}>${T('app.push.lang_ui')}</option>${langs.map(l => html`<option value="${l.code}"${E.language === l.code ? ' selected' : ''}>${l.name}</option>`)}</select></div>
+      <div class="field set-field${E.errs.rate ? ' invalid' : ''}" data-key="rate"><div class="set-l"><label for="push-o-rate">${T('app.push.rate')}</label></div>
+        <input type="number" id="push-o-rate" data-push="rate" value="${E.rate}" min="${S.push.d.rate[0]}" max="${S.push.d.rate[1]}" inputmode="numeric" aria-describedby="push-o-rate-h">
+        <span class="hint" id="push-o-rate-h">${T('app.push.rate_hint')}</span></div>
+    </div>
+    ${pushSwitch('quiet_bypass', T('app.push.quiet_bypass'), T('app.push.quiet_bypass_hint'))}
+    ${pushSwitch('daily', T('app.push.daily'), T('app.push.daily_hint'))}
+    <div class="push-pv" data-key="pv"><div class="field"><span id="push-smp-l">${T('app.push.preview')}</span>
+      <div class="seg" role="group" aria-labelledby="push-smp-l">${PUSH_SAMPLES.map(s => html`<button type="button" data-act="push-sample" data-v="${s}" aria-pressed="${String(E.sample === s)}">${T('app.push.sample.' + s)}</button>`)}</div></div>
+      ${DEMO ? html`<p class="hint">${T('app.push.demo_note')}</p>` : S.push.pvErr ? html`<p class="hint bad">${icon('i-alert')} ${S.push.pvErr}</p>`
+        : pv ? html`<p class="hint">${T('app.push.preview_hint')}${S.push.d.advertised ? '' : ' ' + T('app.push.no_link')}</p>
+          <pre class="push-req mono" tabindex="0" aria-label="${T('app.push.preview')}">${pushPvText(pv)}</pre>` : html`<p class="hint">${T('ui.loading')}</p>`}</div>
+    <div class="ai-acts"><button type="submit" class="btn"${E.saving ? ' disabled' : ''}>${icon('i-check')}${T(E.id ? 'app.ai.save' : 'app.push.create')}</button>
+      <button type="button" class="btn ghost" data-act="push-cancel">${T('app.cancel')}</button></div>
+    ${E.id ? '' : html`<p class="hint">${T('app.push.starts_paused')}</p>`}
+  </form>`;
+}
+function pushCard(sec) {
+  const P = S.push, d = P.d, items = setItems('push');
+  let body;
+  if (!d) body = P.err ? html`<p class="hint bad">${icon('i-alert')} ${P.err}</p>` : html`<p class="hint">${T('ui.loading')}</p>`;
+  else {
+    body = html`
+      <p class="muted" style="margin:0 0 var(--s2)">${T('app.push.intro')}</p>
+      <p class="push-note" role="note">${icon('i-shield')}<span>${T('app.push.promise')}</span></p>
+      ${DEMO || d.demo ? html`<p class="push-note" role="note">${icon('i-bulb')}<span>${T(DEMO ? 'app.push.demo_readonly' : 'app.push.demo_db')}</span></p>` : ''}
+      ${d.channels.length ? html`<ul class="plain push-list">${d.channels.map(pushRow)}</ul>` : html`<p class="hint">${T('app.push.none')}</p>`}
+      ${P.ed ? pushEditor() : html`<div class="field push-add"><label for="push-type">${T('app.push.add')}</label>
+        <div class="push-add-row"><select id="push-type" data-push-type><option value="">${T('app.push.choose_type')}</option>
+          <optgroup label="${T('app.push.self_hosted')}">${d.types.filter(t => !t.hosted).map(t => html`<option value="${t.type}">${t.name}</option>`)}</optgroup>
+          <optgroup label="${T('app.push.hosted_group')}">${d.types.filter(t => t.hosted).map(t => html`<option value="${t.type}">${t.name}</option>`)}</optgroup></select>
+          <button type="button" class="btn" data-act="push-new"${d.channels.length >= d.max ? ' disabled' : ''}>${icon('i-plus')}${T('app.push.add_btn')}</button></div></div>`}
+      <form class="set-form" data-set-form="push" novalidate>${items.map(setField)}
+        <div class="ai-acts"><button type="submit" class="btn ghost"${S.set.saving === 'push' ? ' disabled' : ''}>${icon('i-check')}${T('app.ai.save')}</button></div></form>
+      <p class="hint">${T('app.push.env_doc', { prefix: d.env_prefix })}</p>`;
+  }
+  return card({ key: 'set-push', cls: 'span2', icon: 'i-bell', title: sec.label, body });
+}
+
 // Round 8: "netwarden 0.1.0 · AGPL-3.0-or-later · Source code" for EVERY signed-in user
 // (AGPL section 13: people using a modified version over the network can find its source).
 // Version, license and URL come from /api/meta (netwarden.SOURCE_URL - one constant); only
@@ -3210,7 +3462,7 @@ function viewSettings() {
   if (!s) return S.ai.err ? html`${phead(T('app.nav.settings'))}${card({ key: 'err', body: empty('i-alert', S.ai.err) })}` : skeleton(4);
   return html`${phead(T('app.nav.settings'), T('app.set.sub'), demoPill())}
     <div class="grid">
-      ${(s.sections || []).map(sec => (sec.key === 'ai' ? aiCard() : (sec.key === 'phone' ? phoneCard() : setCard(sec))))}
+      ${(s.sections || []).map(sec => (sec.key === 'ai' ? aiCard() : sec.key === 'phone' ? phoneCard() : sec.key === 'push' ? pushCard(sec) : setCard(sec)))}
       ${tuningCard()}
       ${connCard()}
       ${backupCard()}
@@ -4373,10 +4625,11 @@ function onRoute() {
   if (r.name === 'people' && S.ppl.r) setTimeout(openPersonFormSoon);   // "Add a person…" from a device (People already loaded)
   if (S.base === 'ai' && S.chat.open) { S.chat.open = false; saveChat(); }   // the page IS the chat
   const fresh = ['system', 'settings', 'welcome'];
-  if (fresh.includes(S.base) && was !== S.base) { S.ai.test = null; S.set.errs = {}; loadAI(); loadPair(); }   // fresh settings on each visit
+  if (fresh.includes(S.base) && was !== S.base) { S.ai.test = null; S.set.errs = {}; loadAI(); loadPair(); if (S.base === 'settings') loadPush(); }   // fresh settings on each visit
   if (S.base === 'welcome' && was !== 'welcome') { loadSetup(); wzTick(); }
   if (S.base !== 'settings' && S.pair.code) S.pair.code = null;   // a pairing code is not left on screen
   if (S.base !== 'settings' && S.set.bk) S.set.bk = null;         // nor a half-done restore
+  if (S.base !== 'settings' && S.push.ed) { S.push.ed = null; S.push.pv = null; }   // nor typed tokens
   if (S.base !== 'inbox') S.inbox.picked.clear();
   if (S.base === 'family' && was !== 'family' && S.meta) loadFamily();
   if (S.base === 'security' && was !== 'security' && S.meta) loadHyg();
@@ -4577,7 +4830,8 @@ async function setLang(code, persist) {
   loadChoices(); refresh();
   // pages whose server texts were fetched once per visit: fetch them in the new language
   if (['system', 'settings', 'welcome'].includes(S.base)) loadAI();
-  if (S.base === 'settings') loadTuning();
+  S.push.log = {};   // the delivery logs' texts are localized too: an open one is fetched again
+  if (S.base === 'settings') { loadTuning(); loadPush(); if (S.push.logOpen != null) pushLogLoad(S.push.logOpen); }
   return true;
 }
 
@@ -4730,6 +4984,9 @@ function paletteActions(q) {
   const toCard = key => () => { go('#/settings'); setTimeout(() => { const c = document.querySelector(`[data-key="${key}"]`); if (c) c.scrollIntoView({ block: 'start' }); }, 150); };
   a('act:tuning', T('app.tune.title'), 'i-bell', toCard('tuning'), { kw: 'tune mute snooze alerts sensitivity' });
   if (local) a('act:quiet', T('settings.section.quiet'), 'i-moon', toCard('set-quiet'), { kw: 'quiet hours night do not disturb' });
+  // Round 10 N: push notification channels (admins only, like everything about channels)
+  if (local) a('act:push', T('settings.section.push'), 'i-bell', toCard('set-push'), { kw: 'push notifications ntfy gotify telegram discord slack line matrix webhook home assistant phone' });
+  if (local) a('act:push-add', T('app.push.add'), 'i-bell', () => { go('#/settings'); setTimeout(() => { const s = $('#push-type'); if (s) { s.scrollIntoView({ block: 'center' }); s.focus({ preventScroll: true }); } }, 300); }, { kw: 'push notification channel add new' });
   if (inboxCount()) a('act:inbox-undo', T('app.inbox.undo_last'), 'i-refresh', inboxUndo, { keys: ['u'] });
   if (UNDO_STACK.length) a('act:undo', T('app.key.undo'), 'i-refresh', undoLast, { keys: [MOD, 'Z'] });
   if (local) {
@@ -4992,8 +5249,8 @@ const DEMO_WRITES = new Set(['mute', 'trust', 'untrust', 'edit', 'ib-do', 'ib-bu
   'quiet-seen', 'use-name', 'sug-set', 'probe-off', 'pair-revoke', 'pair-revoke-all', 'lan-toggle', 'logout', 'bed-new',
   'bed-edit', 'bed-delete', 'bed-toggle', 'ppl-new', 'ppl-edit', 'add-person-for', 'ppl-delete', 'ppl-add-dev',
   'ppl-rm-dev', 'ppl-link', 'ppl-link-no', 'pres-on', 'pres-off', 'pres-forget', 'pres-dev', 'pres-default',
-  'pres-notify', 'bulk-assign']);
-const DEMO_INSTALL = new Set(['check', 'check-all', 'conn-test', 'wz-scan', 'wz-test', 'ai-test', 'ai-preview',
+  'pres-notify', 'bulk-assign', 'push-enable', 'push-delete']);
+const DEMO_INSTALL = new Set(['push-test', 'push-helper', 'check', 'check-all', 'conn-test', 'wz-scan', 'wz-test', 'ai-test', 'ai-preview',
   'bk-download', 'pair-new']);
 if (DEMO) {
   document.addEventListener('click', e => {
@@ -5198,6 +5455,20 @@ document.addEventListener('click', e => {
       break;
     }
     case 'pres-notify': presNotify(+b.dataset.id, b.dataset.k); break;
+    // Round 10 N: notification channels
+    case 'push-new': { const t = ($('#push-type') || {}).value; if (t) pushNew(t); else { const x = $('#push-type'); if (x) x.focus(); } break; }
+    case 'push-edit': pushEdit(+b.dataset.id); break;
+    case 'push-cancel': S.push.ed = null; S.push.pv = null; render(); { const x = $('#push-type'); if (x) x.focus(); } break;
+    case 'push-test': pushTest(+b.dataset.id); break;
+    case 'push-enable': pushAct('/api/channels/enable', { id: +b.dataset.id, enabled: b.dataset.v === '1' }, T(b.dataset.v === '1' ? 'app.push.resumed' : 'app.push.paused_toast')); break;
+    case 'push-delete': pushDelete(+b.dataset.id, b.dataset.name || ''); break;
+    case 'push-log': pushLog(+b.dataset.id); break;
+    case 'push-level': if (S.push.ed) { S.push.ed.level = b.dataset.v; delete S.push.ed.errs.level; render(); pushPreview(true); } break;
+    case 'push-sample': if (S.push.ed) { S.push.ed.sample = b.dataset.v; render(); pushPreview(true); } break;
+    case 'push-bool': if (S.push.ed) { const k = b.dataset.k; S.push.ed[k] = !S.push.ed[k]; render(); pushPreview(); } break;
+    case 'push-clear': if (S.push.ed) { const k = b.dataset.k; S.push.ed.clear[k] = !S.push.ed.clear[k]; S.push.ed.secrets[k] = ''; render(); pushPreview(); } break;
+    case 'push-helper': pushHelper(b.dataset.v); break;
+    case 'push-use': if (S.push.ed) { S.push.ed.fields[b.dataset.k] = b.dataset.v; render(); pushPreview(); { const x = $('#push-f-' + b.dataset.k); if (x) x.focus(); } } break;
     case 'bulk-all': filtered().forEach(d => { if (d.mac) S.bulk.add(d.mac); }); render(); break;
     case 'bulk-none': S.bulk.clear(); render(); break;
     case 'bulk-assign': {
@@ -5210,6 +5481,7 @@ document.addEventListener('submit', e => {
   if (e.target.closest('form[data-bed-form]')) { e.preventDefault(); submitBedForm(); return; }
   if (e.target.closest('form[data-person-form]')) { e.preventDefault(); savePerson(); return; }
   if (e.target.closest('form[data-ai-form]')) { e.preventDefault(); saveAI(); return; }
+  if (e.target.closest('form[data-push-form]')) { e.preventDefault(); pushSave(); return; }
   { const sf = e.target.closest('form[data-set-form]'); if (sf) { e.preventDefault(); saveSettings(sf.dataset.setForm); return; } }
   if (e.target.closest('form[data-probe-form]')) { e.preventDefault(); saveProbe((S.probe != null ? S.probe : ((S.data.health || {}).internet || {}).target || '').trim()); return; }
   const f = e.target.closest('form[data-mac]'); if (!f) return;
@@ -5224,6 +5496,13 @@ document.addEventListener('input', e => {
   else if (el.dataset.mapf) { S.map[el.dataset.mapf] = el.value; render(); }
   else if (el.dataset.ai) S.ai.form[el.dataset.ai] = el.value;
   else if (el.dataset.set) { S.set.form[el.dataset.set] = el.value; delete S.set.errs[el.dataset.set]; }
+  else if (S.push.ed && (el.dataset.push || el.dataset.pushF || el.dataset.pushS)) {
+    const E = S.push.ed;
+    if (el.dataset.push) { E[el.dataset.push] = el.value; delete E.errs[el.dataset.push]; }
+    else if (el.dataset.pushF) { E.fields[el.dataset.pushF] = el.value; delete E.errs[el.dataset.pushF]; }
+    else { E.secrets[el.dataset.pushS] = el.value; delete E.errs[el.dataset.pushS]; }
+    pushPreview();
+  }
   else if ('wzTz' in el.dataset) S.setup.tz = el.value;
   else if ('probe' in el.dataset) S.probe = el.value;
   else if (el.dataset.bed && S.fam.form) {
@@ -5243,6 +5522,12 @@ document.addEventListener('change', e => {
   if (el.dataset.mapf) { S.map[el.dataset.mapf] = el.value; render(); return; }
   if (el.dataset.ai) { S.ai.form[el.dataset.ai] = el.value; if (el.tagName === 'SELECT') render(); return; }
   if (el.dataset.set) { S.set.form[el.dataset.set] = el.value; render(); return; }
+  if (S.push.ed && el.dataset.push && el.tagName === 'SELECT') { S.push.ed[el.dataset.push] = el.value; render(); pushPreview(true); return; }
+  if (S.push.ed && 'pushCat' in el.dataset) {
+    const E = S.push.ed, c = el.dataset.pushCat;
+    E.categories = el.checked ? E.categories.concat(c) : E.categories.filter(x => x !== c); pushPreview(); return;
+  }
+  if (S.push.ed && 'pushConfirm' in el.dataset) { S.push.ed.confirm = el.checked; delete S.push.ed.errs.level; return; }
   if ('qday' in el.dataset) { setQuietDay(el.dataset.qday, el.value); render(); return; }
   if ('qdayT' in el.dataset) { const [d, i] = el.dataset.qdayT.split(':'); setQuietDay(d, null, +i, el.value); render(); return; }
   if ('ibPick' in el.dataset) {
@@ -5448,7 +5733,7 @@ setInterval(tick, 5000);
   onRoute();
   if (['system', 'settings', 'welcome'].includes(S.base)) { loadAI(); loadPair(); }   // opened straight on one of them
   if (S.base === 'welcome') { loadSetup(); wzTick(); }
-  if (S.base === 'settings') loadTuning();
+  if (S.base === 'settings') { loadTuning(); loadPush(); }
   if (S.base === 'security') loadHyg();
   sinceInit();
   setInterval(sinceStamp, 60000);

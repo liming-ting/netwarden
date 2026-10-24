@@ -284,6 +284,12 @@ register(Setting("quiet.end", "time", "07:00", None, "quiet", max_len=5,
 register(Setting("quiet.days", "str", "", None, "quiet", max_len=120, validator=_quiet_days,
                  placeholder="4=23:30-09:00,5=off"))
 register(Setting("quiet.critical", "bool", True, None, "quiet"))
+# Round 10 N: push notification channels (push.py) - when the digests go out (local time).
+register(Setting("push.digest_time", "time", "08:00", "NETWARDEN_NOTIFY_DIGEST_TIME", "push",
+                 admin=True, max_len=5, validator=_quiet_time("push.digest_time"),
+                 placeholder="08:00"))
+register(Setting("push.weekly_day", "choice", "0", None, "push", admin=True,
+                 choices=("0", "1", "2", "3", "4", "5", "6")))
 register(Setting("ai.key", "secret", None, "NETWARDEN_AI_KEY", "ai", secret=True, admin=True))
 register(Setting("ai.anthropic_key", "secret", None, "ANTHROPIC_API_KEY", "ai", secret=True,
                  admin=True))
@@ -346,6 +352,7 @@ def get(db, env: dict | None, key: str):
 
 # The settings page's sections, in order, and which registry groups each one shows.
 SECTIONS = (("general", ("general", "data")), ("alerts", ("alerts",)), ("quiet", ("quiet",)),
+            ("push", ("push",)),
             ("ai", ("ai",)), ("usage", ("usage",)),
             ("family", ("family",)), ("health", ("health",)), ("phone", ("lan",)))
 SECTION_OF = {g: sec for sec, groups in SECTIONS for g in groups}

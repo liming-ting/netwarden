@@ -55,7 +55,7 @@ from netwarden import activity, brain, cache, demo, dns_ingest, i18n, pairing, w
 DATA_DIR = "demo-data/"
 DEFAULT_SITE = "https://liming-ting.github.io/netwarden/"
 DEMO_TZ = "Asia/Taipei"        # the demo home's zone (its evenings and school nights)
-OG_IMAGE = ROOT / "docs" / "images" / "devices-desktop.png"
+OG_IMAGE = ROOT / "docs" / "images" / "social-preview.png"   # 1280x640, also GitHub's social preview
 OG_LANG = "en"                 # link previews: the launch is international
 # static/ files the demo page uses (sw.js / offline.js / pair.js: server-only features)
 STATIC_FILES = ("app.css", "app.js", "map.js", "demo.js", "report.css", "report.js",
@@ -66,7 +66,7 @@ PAGES = ("/api/locale", "/api/overview", "/api/hygiene", "/api/tuning", "/api/ty
          "/api/people", "/api/rooms", "/api/screentime?days=7", "/api/weekly", "/api/bedtime",
          "/api/pair/sessions", "/api/ai/usage", "/api/settings", "/api/setup",
          "/api/ai/questions", "/api/export/devices.csv", "/api/export/report.md",
-         "/report/weekly")
+         "/report/weekly", "/api/channels")
 DEVICE_GETS = ("/api/device?mac={m}", "/api/activity?mac={m}", "/api/timeline?mac={m}",
                "/api/screentime?days=7&device={m}")
 REPORT_PERIODS, REPORT_FORMATS = ("7", "30"), ("html", "md")
@@ -319,6 +319,11 @@ def _crawl(site: Site, request, langs, quick: bool, now: datetime, log) -> dict:
     person_gets = [f"/api/person?id={i}" for i in people]
     for ans in get_all(person_gets, first):
         links(ans, found)
+    # each demo channel's "Delivery log" (the seeded, synthetic history)
+    channel_ids = [c["id"] for c in json.loads(site.files[static_name(with_lang("/api/channels", first))])
+                   .get("channels", []) if isinstance(c.get("id"), int)]
+    channel_gets = [f"/api/channels/log?id={i}" for i in channel_ids]
+    get_all(channel_gets, first)
     macs = sorted(found["mac"])
     device_gets = [g.format(m=quote(m, safe="")) for m in macs for g in DEVICE_GETS]
     if quick:
@@ -338,7 +343,7 @@ def _crawl(site: Site, request, langs, quick: bool, now: datetime, log) -> dict:
             links(ans, found)
     capped = bool(pending())
     reports = report_requests()[:2] if quick else report_requests()
-    everything = list(PAGES) + person_gets + device_gets + lookups + reports
+    everything = list(PAGES) + person_gets + channel_gets + device_gets + lookups + reports
     for lang in langs[1:]:
         get_all(everything, lang)
     get_all(reports, first)

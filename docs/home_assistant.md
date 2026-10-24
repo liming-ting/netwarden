@@ -97,6 +97,16 @@ dashboard but not the admin actions; revoke them on the same card. This is plain
 use it on a trusted home network only. Through Home Assistant's app or Nabu Casa you can
 also simply open the sidebar panel instead.
 
+## Notifications to the Home Assistant app
+
+netwarden can send selected alerts to your phone through Home Assistant's notify services
+(`notify.mobile_app_<your phone>`): **Settings > Notifications**, add a **Home Assistant**
+channel. It needs your HA URL (e.g. `http://homeassistant.local:8123`) and a **long-lived
+access token** (your HA profile > Security), because the add-on keeps
+`homeassistant_api` **off** - that permission would give it the whole Home Assistant Core
+API and lower its security rating. Why, and what the token is used for:
+[notifications.md](notifications.md#home-assistant-why-a-url-and-a-token).
+
 ## What the add-on can and can't do
 
 - **Network access:** it uses the host network (`host_network`) so discovery (ARP table,
