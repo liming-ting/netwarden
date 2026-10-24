@@ -658,11 +658,14 @@ def t_network_health(ctx: Ctx, a: dict) -> dict:
     w = window_bounds(ctx, a["window"])
     hours = max(1.0, (ctx.now - w["start"]).total_seconds() / 3600)
     rep = nethealth.report(ctx.db, ctx.lang, hours=min(hours, 24 * 7), tz=ctx.tz)
+    # the verdict and its sentence are the Network health page's own (now / the last 24 h,
+    # the period named in the text); the numbers below cover the asked window
+    page = nethealth.report(ctx.db, ctx.lang, tz=ctx.tz) if rep["hours"] != 24 else rep
     gw, dns = rep["gateway"], rep["dns"]
     outs = [o for o in nethealth.outage_list(ctx.db, days=31)
             if o["end_ts"] >= _iso(w["start"]) and o["start_ts"] <= _iso(w["end"])]
-    return {**_win_out(w), "verdict": rep["verdict"]["key"], "summary": rep["verdict"]["title"],
-            "detail": rep["verdict"]["text"],
+    return {**_win_out(w), "verdict": page["verdict"]["key"], "summary": page["verdict"]["title"],
+            "detail": page["verdict"]["text"], "verdict_covers": "now; detail: the last 24 h",
             "router": {"measured": gw["measured"], "avg_ms": gw.get("avg_ms"), "loss": gw.get("loss")},
             "dns": {"measured": dns["measured"], "fail_rate": dns.get("fail_rate"),
                     "avg_ms": dns.get("avg_ms")},

@@ -101,7 +101,9 @@ only the static build's index.html has either. In the real app nothing changes (
   chips: on the `suggest` SSE event the page moves that last paragraph into `m.sugHead`
   and shows it only with the chips (hidden for other-language messages / filtered demo
   chips). Counts go through `i18n.tn` - suggestions too (`sug.<kind>.*_one` carry `{n}`).
-  The health intent names its window (`intent.health_head`; the health page = last 24 h).
+  The health intent leads with the outages of the asked window (`intent.health_had_outages`),
+  then "Right now" = the Network health page's own 24 h verdict (`intent.health_now`), so
+  "All good" never sits above a list of outages and the numbers are the page's.
 - The assistant's subtitle is `app.demo.ai_mode` ("demo: saved answers, no AI is
   called"), never the real app's "chosen with --offline-ai".
 - A 404 without a message reads `app.demo.not_found` ("not part of the demo") with a

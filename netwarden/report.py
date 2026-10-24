@@ -274,7 +274,7 @@ def _sug_params(params: dict, lang: str) -> dict:
             doms = [d.strip() for d in out[k].split(sep) if d.strip()]
             names = services.services_for(doms, lang)
             out[k] = i18n.t("list_sep", lang).join(names) if names else \
-                i18n.t("share.n_domains", lang, n=out.get("n") or len(doms))
+                i18n.tn("share.n_domains", out.get("n") or len(doms), lang)
     for k in ("ip", "ports"):
         if k in out:
             out[k] = i18n.t("share.hidden", lang)
@@ -299,14 +299,14 @@ def _suggestions_section(db, lang, env, opts, names) -> dict:
                      if k in ("adguard", "pihole") and v]
         blocks.append({"t": "sug", "title": it["title"], "why": it["why"], "severity": it["severity"],
                        "severity_name": it["severity_name"], "pillar": it["pillar_name"],
-                       "points": t("share.sug_points", n=it["points"]) if it["points"] else "",
+                       "points": i18n.tn("share.sug_points", it["points"], lang) if it["points"] else "",
                        "platforms": [{"name": p["name"], "steps": p["steps"]} for p in it["platforms"]],
                        "rules": rules,
                        "rules_hidden": bool(it.get("rules")) and not full})
     if not items:
         blocks.append(_p(t("share.sug_none"), "ok"))
     elif len(items) > MAX_SUGGESTIONS:
-        blocks.append(_p(t("share.sug_more", n=len(items) - MAX_SUGGESTIONS), "muted"))
+        blocks.append(_p(i18n.tn("share.sug_more", len(items) - MAX_SUGGESTIONS, lang), "muted"))
     if any(b.get("rules_hidden") for b in blocks):
         blocks.append(_p(t("share.rules_hidden"), "muted"))
     return {"key": "suggestions", "title": t("share.sec.suggestions"), "blocks": blocks}
@@ -330,7 +330,7 @@ def _devices_section(db, lang, tz, opts, scrub, types, since) -> dict:
         r["room"] = prof.get("room") or ""
     new = [r for r in rows if (r["first_seen"] or "") >= since and not r["is_self"]]   # as in "notable"
     unknown = [r for r in rows if r["type"] == "unknown"]
-    blocks = [_p(t("share.dev_summary", n=len(rows), new=len(new), unknown=len(unknown)))]
+    blocks = [_p(i18n.tn("share.dev_summary", len(rows), lang, new=len(new), unknown=len(unknown)))]
     if not rows:
         return {"key": "devices", "title": t("share.sec.devices"), "blocks": blocks}
     by_type: dict = {}
@@ -444,7 +444,7 @@ def _events_section(db, lang, tz, period, now, outages) -> dict:
                    (since,)).fetchone()
     new = db.execute("SELECT COUNT(*) FROM devices WHERE first_seen >= ? AND is_self = 0", (since,)).fetchone()[0]
     threats = alerts.recent_threats(db, since)
-    lines = [t("share.ev.lookups", n=f"{c['q']:,}", blocked=f"{c['b']:,}") if c["q"] else t("share.ev.no_dns"),
+    lines = [i18n.tn("share.ev.lookups", c["q"], lang, n=i18n.num(c["q"], lang), blocked=i18n.num(c["b"], lang)) if c["q"] else t("share.ev.no_dns"),
              t("share.ev.new", n=new), t("share.ev.threats", n=len(threats)),
              t("share.ev.outages", n=len(outages))]
     blocks = [{"t": "ul", "items": lines}]
@@ -548,11 +548,21 @@ table.small th,table.small td{white-space:normal;overflow-wrap:anywhere}tr{break
 """
 
 
-def _chart_html(b: dict) -> str:
-    """An inline SVG chart (bars = horizontal, cols = per day, line = a trend)."""
+def _num(v, lang: str) -> str:
+    """A chart value the language's way ("1,234" / "1.234" / "1 234"); None -> "—"."""
+    if v is None:
+        return "—"
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return i18n.num(v, lang, 0 if float(v).is_integer() else 1)
+    return str(v)
+
+
+def _chart_html(b: dict, lang: str) -> str:
+    """An inline SVG chart (bars = horizontal, cols = per day, line = a trend); its text
+    alternative lists the values with the language's list separator and number format."""
     data, top = b["data"], b.get("max") or 1
-    alt = b["title"] + ": " + ", ".join(f'{d["label"]} {d["value"] if d["value"] is not None else "—"}'
-                                        for d in data)
+    alt = b["title"] + ": " + i18n.t("list_sep", lang).join(f'{d["label"]} {_num(d["value"], lang)}'
+                                                           for d in data)
     if b["kind"] == "bars":
         lw, w, rh = 170, 640, 26
         h = rh * len(data) + 6
@@ -565,7 +575,7 @@ def _chart_html(b: dict) -> str:
                          f'<rect class="track" x="{lw}" y="{y + 4}" width="{w - lw - 60}" height="16" rx="3"/>'
                          f'<rect class="{_e(d.get("level") or "info")}" x="{lw}" y="{y + 4}" width="{bw:.1f}" '
                          f'height="16" rx="3"/><text x="{w - 52}" y="{y + 16}">'
-                         f'{_e(d.get("note") or (str(val) if val is not None else "—"))}</text>')
+                         f'{_e(d.get("note") or _num(val, lang))}</text>')
     elif b["kind"] == "cols":
         w, h, base = 640, 150, 120
         n = max(1, len(data))
@@ -579,7 +589,7 @@ def _chart_html(b: dict) -> str:
                          f'width="{cw * .7:.1f}" height="{bh:.1f}" rx="2"/>')
             if i % step == 0:
                 parts.append(f'<text x="{x + cw / 2:.1f}" y="{base + 16}" text-anchor="middle">{_e(d["label"])}</text>')
-        parts.append(f'<text x="12" y="12">{_e(top)}</text>')
+        parts.append(f'<text x="12" y="12">{_e(_num(top, lang))}</text>')
     else:   # line
         w, h, base = 640, 160, 130
         n = len(data)
@@ -593,13 +603,13 @@ def _chart_html(b: dict) -> str:
             parts.append(f'<circle class="{_e(d.get("level") or "info")}" cx="{x:.1f}" cy="{y:.1f}" r="3.5"/>')
             if i % step == 0 or i == n - 1:
                 parts.append(f'<text x="{x:.1f}" y="{base + 16}" text-anchor="middle">{_e(d["label"])}</text>'
-                             f'<text x="{x:.1f}" y="{y - 8:.1f}" text-anchor="middle">{_e(d["value"])}</text>')
+                             f'<text x="{x:.1f}" y="{y - 8:.1f}" text-anchor="middle">{_e(_num(d["value"], lang))}</text>')
     return (f'<figure><svg viewBox="0 0 {w} {h}" role="img" aria-label="{_e(alt)}" '
             f'xmlns="http://www.w3.org/2000/svg"><title>{_e(alt)}</title>{"".join(parts)}</svg>'
             f'<figcaption>{_e(b["title"])}</figcaption></figure>')
 
 
-def _block_html(b: dict) -> str:
+def _block_html(b: dict, lang: str) -> str:
     kind = b["t"]
     if kind == "p":
         return f'<p class="{_e(b.get("cls"))}">{_e(b["text"])}</p>' if b.get("cls") else f'<p>{_e(b["text"])}</p>'
@@ -622,7 +632,7 @@ def _block_html(b: dict) -> str:
         return (f'<div class="tw"><table{" class=small" if b.get("small") else ""}><thead><tr>{head}</tr></thead>'
                 f"<tbody>{rows}</tbody></table></div>")
     if kind == "chart":
-        return _chart_html(b)
+        return _chart_html(b, lang)
     if kind == "sug":
         tags = " · ".join(_e(x) for x in (b["severity_name"], b["pillar"], b["points"]) if x)
         plats = "".join(f'<h4>{_e(p["name"])}</h4><ol>' + "".join(f"<li>{_e(s)}</li>" for s in p["steps"]) + "</ol>"
@@ -638,7 +648,7 @@ def render_html(doc: dict) -> str:
     lab = m["labels"]
     toc = "".join(f'<li><a href="#s-{_e(s["key"])}">{_e(s["title"])}</a></li>' for s in doc["sections"])
     body = "".join(f'<section id="s-{_e(s["key"])}"{" class=first" if i == 0 else ""}><h2>{_e(s["title"])}</h2>'
-                   + "".join(_block_html(b) for b in s["blocks"]) + "</section>"
+                   + "".join(_block_html(b, m["lang"]) for b in s["blocks"]) + "</section>"
                    for i, s in enumerate(doc["sections"]))
     demo = f' · {_e(m["demo_note"])}' if m["demo"] else ""
     return f"""<!doctype html>
@@ -677,7 +687,7 @@ def render_html(doc: dict) -> str:
 
 # --- Markdown --------------------------------------------------------------------------------
 
-def _block_md(b: dict) -> list:
+def _block_md(b: dict, lang: str) -> list:
     kind = b["t"]
     if kind == "p":
         return [(_md_cell(b["text"]) if b.get("cls") != "muted" else "_" + _md_cell(b["text"]) + "_"), ""]
@@ -695,7 +705,7 @@ def _block_md(b: dict) -> list:
         lines += ["| " + " | ".join(_md_cell(c) for c in r) + " |" for r in b["rows"]]
         return lines + [""]
     if kind == "chart":
-        vals = " · ".join(f'{_md_cell(d["label"])} {_md_cell(d.get("note") or d["value"])}'
+        vals = " · ".join(f'{_md_cell(d["label"])} {_md_cell(d.get("note") or _num(d["value"], lang))}'
                           for d in b["data"])
         return [f"**{_md_cell(b['title'])}:** {vals}", ""]
     if kind == "sug":
@@ -724,7 +734,7 @@ def render_md(doc: dict) -> str:
     for s in doc["sections"]:
         lines += [f"## {_md_cell(s['title'])}", ""]
         for b in s["blocks"]:
-            lines += _block_md(b)
+            lines += _block_md(b, m["lang"])
     lines += ["---", "", _md_cell(m["footer"])]
     return "\n".join(lines) + "\n"
 

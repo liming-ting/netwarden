@@ -153,12 +153,17 @@ def _signed(p: int) -> str:
 
 
 def _trend(m: dict, key: str, lang: str, **kw) -> str:
-    """'<key>.up' / '.down' / '.same' with pct and both values."""
+    """'<key>.up' / '.down' / '.same' with pct and both values; a count `n` is written the
+    language's way ("1,444" / "1.444" / "1 444", as the cards above show it) and picks the
+    plural form."""
     p = m["pct"]
     if p is None:
         return ""
     way = "same" if abs(p) < MIN_CHANGE_PCT else ("up" if p > 0 else "down")
-    return i18n.t(f"{key}.{way}", lang, pct=abs(p), **kw)
+    if isinstance(kw.get("n"), int):
+        n = kw.pop("n")
+        return i18n.tn(f"{key}.{way}", n, lang, n=i18n.num(n, lang), pct=i18n.num(abs(p), lang), **kw)
+    return i18n.t(f"{key}.{way}", lang, pct=i18n.num(abs(p), lang), **kw)
 
 
 def highlights(c: dict, lang: str, limit: int = 5) -> list:

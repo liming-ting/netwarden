@@ -167,6 +167,61 @@ def standing(q: str) -> dict | None:
     return None
 
 
+# The chat's data-driven chips (app.js suggestions(): "Is the open port 23 on ipcam
+# dangerous?") -> the intent that answers them, matched by their template in ANY language
+# (round 10d review: their words alone sent "port" to the router forwards and "誰在" to
+# who's home). Placeholders: {name} = a device, {port} = a port, {time} = "HH:MM".
+CHIPS = {"app.ai.q.exposure": {"intent": "exposure", "window": "7d"},
+         "app.ai.q.night": {"intent": "night", "window": "7d"},
+         "app.ai.q.threat": {"intent": "alerts", "window": "24h"},
+         "app.ai.q.visibility": {"intent": "alerts", "window": "24h"},
+         "app.ai.q.new": {"intent": "new_devices", "window": "7d"},
+         "app.ai.q.change": {"intent": "new_devices", "window": "7d"},
+         "app.ai.q.bandwidth": {"intent": "traffic", "window": "24h"}}
+_CHIP_GROUPS = {"name": r"(?P<name>.+?)", "port": r"(?P<port>\d{1,5})", "time": r"(?P<time>\d{1,2}:\d{2})"}
+_CHIP_RX: dict = {}
+
+
+def _chip_rx(key: str, code: str):
+    if (key, code) not in _CHIP_RX:
+        parts = re.split(r"(\{\w+\})", i18n.t(key, code).strip())
+        body = "".join(_CHIP_GROUPS.get(p[1:-1], re.escape(p)) if p.startswith("{") else re.escape(p)
+                       for p in parts)
+        _CHIP_RX[(key, code)] = re.compile(r"\s*" + body + r"\s*", re.I | re.S)
+    return _CHIP_RX[(key, code)]
+
+
+def _device_named(db, name: str, lang: str) -> str | None:
+    """The MAC of the device called exactly `name` (any of its names), else the one named in it."""
+    n = name.strip().casefold()
+    for src in (naming.display_names(db, lang), store.device_names(db), store.identity_names(db)):
+        for mac, v in src.items():
+            if (v or "").strip().casefold() == n:
+                return mac
+    return mention_device(db, name, lang)
+
+
+def chip(db, q: str, lang: str) -> dict | None:
+    """{intent, window, device, port, at} when `q` is one of the chat's data-driven chips."""
+    for key, m in CHIPS.items():
+        for code in dict.fromkeys([lang] + list(i18n.CODES)):
+            hit = _chip_rx(key, code).fullmatch(q)
+            if hit is None:
+                continue
+            g = hit.groupdict()
+            out = dict(m)
+            if g.get("name") is not None:
+                out["device"] = _device_named(db, g["name"], lang)
+                if out["device"] is None:
+                    break        # a name we do not know: not this chip, try the next template
+            if g.get("port"):
+                out["port"] = int(g["port"])
+            if g.get("time"):
+                out["at"] = g["time"]
+            return out
+    return None
+
+
 def _find(patterns: dict, lang: str, q: str) -> bool:
     # the UI language first, then every pattern set: a Chinese question typed in an English
     # UI (or the reverse) still matches
@@ -237,9 +292,12 @@ def match(db, lang: str, question: str | None, focus: str | None = None) -> dict
         # "Ask AI about this device": the device's full profile (risky domains, open ports,
         # router ports ...) in EVERY language - not the domains its words would match
         return None
-    fixed = standing(q)
+    fixed = standing(q) or chip(db, q, lang)
     if fixed:
         return fixed
+    if any(q.casefold() == i18n.t(k, code).strip().casefold()
+           for k in offline_ai.SUMMARY_CHIPS for code in i18n.CODES):
+        return None     # the summary's own section answers it, in every language
     for s in suggested(db, lang, focus):
         if s["text"].casefold() == q.casefold():
             return {k: s.get(k) for k in ("intent", "window", "after", "device", "person")}
@@ -343,14 +401,17 @@ def r_new(run, t, m, lang):
     w = m["window"] or "7d"
     when = t("aitool.win." + w)
     res = run("list_devices", {"new_since": w, "limit": 20})
-    ch = run("alerts", {"window": w, "type": "change", "limit": 10})
+    # behavior changes are what the alerts call one (a service new in the last 24 h against
+    # the week before): the same list as the dashboard and the summary's, named as such
+    cw = w if w in ("1h", "24h", "last_night") else "24h"
+    ch = run("alerts", {"window": cw, "type": "change", "limit": 10})
     rows = [d for d in res.get("devices") or [] if not d.get("this_computer")]
     lines = [i18n.tn("intent.new_head", len(rows), lang, when=when)] if rows else [t("intent.new_none", when=when)]
     lines += _more(t, [t("intent.new_line", name=d["name"], time=d.get("first_seen") or "—")
                        for d in rows])
     changes = ch.get("alerts") or []
     if changes:
-        lines += ["", t("intent.changes_head", when=when)]
+        lines += ["", t("intent.changes_head", when=t("aitool.win." + cw))]
         lines += _more(t, [_alert_line(t, a) for a in changes], 4)
     return lines
 
@@ -368,13 +429,14 @@ def r_alerts(run, t, m, lang):
     top = _most_unusual(rows) if m.get("top") else None
     if top is None:
         return head + _more(t, [_alert_line(t, a) for a in rows], 5)
-    # "Which device is the most unusual right now?": that ONE device first, then the rest
+    # "Which device is the most unusual right now?": the total (the Overview's own count),
+    # that ONE device, then "N more" - never the rest under the total's heading
     mine = [a for a in rows if a.get("mac") == top]
     rest = [a for a in rows if a.get("mac") != top]
-    lines = [t("intent.unusual_head", name=mine[0].get("device") or mine[0]["title"])]
+    lines = head + [t("intent.unusual_head", name=mine[0].get("device") or mine[0]["title"])]
     lines += [_alert_line(t, a) for a in mine[:4]]
     if rest:
-        lines += ["", i18n.tn("intent.alerts_head", max(len(rest), res["count"] - len(mine)), lang, when=when)]
+        lines += ["", i18n.tn("intent.alerts_more", max(len(rest), res["count"] - len(mine)), lang, when=when)]
         lines += _more(t, [_alert_line(t, a) for a in rest], 4)
     return lines
 
@@ -411,7 +473,28 @@ def r_night(run, t, m, lang):
         rows += res.get("alerts") or []
     if not rows:
         return [t("intent.night_none", when=when)]
+    if m.get("at"):     # "Who was online around 01:04 at night?": that night's alerts first
+        rows.sort(key=lambda a: m["at"] not in a["text"])
     return [t("intent.night_head", when=when)] + _more(t, [_alert_line(t, a) for a in rows], 5)
+
+
+def r_exposure(run, t, m, lang):
+    """"Is the open port 23 on ipcam dangerous?": that device's open-port alerts (what the
+    port is, why it matters, what to do), the asked port first."""
+    names = naming.display_names(run.db, lang)
+    name = names.get(m["device"], m["device"] or "?")
+    res = run("alerts", {"window": m["window"] or "7d", "type": "exposure", "device": m["device"],
+                         "limit": 10})
+    if res.get("error"):
+        return [t("intent.failed")]
+    rows = res.get("alerts") or []
+    port = str(m.get("port") or "")
+    asked = [a for a in rows if port and re.search(rf"(?<!\d){port}(?!\d)", a["title"] + " " + a["text"])]
+    if not asked:
+        return [t("intent.exposure_none", name=name, port=port or "—")]
+    rest = [a for a in rows if a not in asked]
+    return [t("intent.exposure_head", name=name, port=port)] + \
+        [_alert_line(t, a) for a in asked + rest][:5]
 
 
 def _alert_line(t, a: dict) -> str:
@@ -471,13 +554,17 @@ def r_health(run, t, m, lang):
     if res.get("error"):
         return [t("intent.failed")]
     when = t("aitool.win." + w)
-    # the verdict's numbers cover the asked window (7 days by default), the Network health
-    # page's headline the last 24 h: name the window so the two never seem to disagree
-    lines = [t("intent.health_head", summary=res["summary"], when=when), res.get("detail") or ""]
     b = ai_tools.window_bounds(ai_tools.Ctx(run.db, lang), w)
     start, end = ai_tools._iso(b["start"]), ai_tools._iso(b["end"])
     outs = [o for o in nethealth.outage_list(run.db, days=31)
             if o["end_ts"] >= start and o["start_ts"] <= end]
+    # Round 10d: the headline agrees with the details. The verdict is about NOW (the Network
+    # health page's own, its sentence names the last 24 h); outages in the asked window lead
+    # when there were any, so "All good" never sits above a list of outages.
+    lines = []
+    if outs and not any(o["ongoing"] for o in outs):
+        lines.append(i18n.tn("intent.health_had_outages", len(outs), lang, when=when))
+    lines += [t("intent.health_now", summary=res["summary"]), res.get("detail") or ""]
     if outs:
         lines += [t("intent.health_outages", when=when)]
         lines += _more(t, ["• " + nethealth.outage_text(o, lang) for o in outs], 5)
@@ -539,7 +626,7 @@ def r_devices(run, t, m, lang):
 
 RENDER = {"traffic": r_traffic, "domains": r_domains, "presence": r_presence, "new_devices": r_new,
           "alerts": r_alerts, "night": r_night, "screen_time": r_screen, "bedtime": r_bedtime, "health": r_health,
-          "upnp": r_upnp, "hygiene": r_hygiene, "suggestions": r_suggestions, "devices": r_devices}
+          "upnp": r_upnp, "exposure": r_exposure, "hygiene": r_hygiene, "suggestions": r_suggestions, "devices": r_devices}
 
 
 def answer(db, lang: str, question: str | None, focus: str | None = None) -> dict | None:
@@ -550,7 +637,8 @@ def answer(db, lang: str, question: str | None, focus: str | None = None) -> dic
         return None
     t = _t(lang)
     run = _Run(db, lang)
-    m = {"window": None, "after": None, "device": None, "person": None, "day": False, **m}
+    m = {"window": None, "after": None, "device": None, "person": None, "day": False, "port": None,
+         "at": None, **m}
     lines = RENDER[m["intent"]](run, t, m, lang)
     text = "\n".join([t("intent.title"), ""] + lines + ["", t("offline.enable_hint")])
     return {"intent": m["intent"], "text": text, "tools": run.chips}
@@ -565,6 +653,19 @@ def suggested(db, lang: str, focus: str | None = None, n: int = 6) -> list:
     lang = i18n.normalize(lang)
     return cache.memo(db, "ai_intents.suggested", (lang, focus or "", n),
                       lambda: _suggested(db, lang, focus, n))
+
+
+def _busiest(db, n: int = 5) -> list:
+    """The MACs with the most lookups in the last 24 h, busiest first."""
+    res = ai_tools.run(db, "list_devices", {"limit": n}, "en")
+    return [d["mac"] for d in res.get("devices") or [] if d.get("dns_lookups_24h")]
+
+
+def _late_lookups(db, mac: str) -> int:
+    """Lookups `mac` made last night after 23:00 (what r_domains would list)."""
+    res = ai_tools.run(db, "top_domains", {"window": "last_night", "device": mac, "after": "23:00",
+                                           "limit": 1}, "en")
+    return res.get("lookups") or 0
 
 
 def _suggested(db, lang: str, focus: str | None, n: int) -> list:
@@ -586,12 +687,12 @@ def _suggested(db, lang: str, focus: str | None, n: int) -> list:
         if rows:
             top = rows[0]["mac"]
             add("traffic_night", "traffic", window="last_night")
-    if top is None:      # no bytes: the device with the most lookups last night
-        res = ai_tools.run(db, "list_devices", {"limit": 1}, "en")
-        rows = [d for d in res.get("devices") or [] if d.get("dns_lookups_24h")]
-        top = rows[0]["mac"] if rows else None
-    if top and top != focus:
-        add("domains_after", "domains", name=names.get(top, top), device=top,
+    # "What did <device> connect to after 23:00?" only for a device that did (round 10d: the
+    # busiest device of the night may have been quiet by then - "No lookups" is no answer)
+    late = [m for m in dict.fromkeys([top] + _busiest(db)) if m and m != focus]
+    late = next((m for m in late if _late_lookups(db, m)), None)
+    if late:
+        add("domains_after", "domains", name=names.get(late, late), device=late,
             window="last_night", after="23:00")
     if any(p["presence"] for p in store.people(db)):
         add("presence", "presence")

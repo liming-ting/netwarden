@@ -179,8 +179,8 @@ def timeline(db, mac: str, lang: str = i18n.DEFAULT, tz: tzinfo | None = None,
         if a["mac"] == mac:
             add(a["first_ts"], "unusual_hours", activity.explain(a, lang))
     for s in bandwidth_spikes(db, mac, now):
-        add(s["ts"], "bandwidth_spike", tr("bandwidth_spike", bytes=human_bytes(s["bytes"]),
-                                           h=s["hours"], typical=human_bytes(s["typical"])))
+        add(s["ts"], "bandwidth_spike", tr("bandwidth_spike", bytes=human_bytes(s["bytes"], lang),
+                                           h=s["hours"], typical=human_bytes(s["typical"], lang)))
     ports = exposure.latest(db, mac, lang)
     for p in (ports or {}).get("open", []):
         if p["risk"] in exposure.RISKY or p["new"]:

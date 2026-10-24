@@ -564,17 +564,18 @@ def verdict(h: dict) -> dict:
     return {"level": "ok", "key": "ok", "params": {}}
 
 
-def verdict_text(v: dict, h: dict, lang: str, tz=None) -> dict:
-    """{title, text}: the verdict, plus what was measured / the last outage."""
+def verdict_text(v: dict, h: dict, lang: str, tz=None, hours: float = 24) -> dict:
+    """{title, text}: the verdict, plus what was measured (over the last `hours`, said so:
+    the page's cards next to it show the last hour) / the last outage."""
     title = i18n.t("health.verdict." + v["key"], lang, **v["params"])
     parts = []
     gw, dns = h["gateway"], h["dns"]
     if gw["measured"] and gw["avg_ms"] is not None:
-        parts.append(i18n.t("health.measure.router", lang, ms=_fmt_ms(gw["avg_ms"]),
-                            pct=round(100 * (gw["loss"] or 0))))
+        parts.append(i18n.t("health.measure.router", lang, ms=_fmt_ms(gw["avg_ms"], lang),
+                            pct=round(100 * (gw["loss"] or 0)), h=f"{hours:g}"))
     if dns["measured"] and dns["avg_ms"] is not None:
-        parts.append(i18n.t("health.measure.dns", lang, ms=_fmt_ms(dns["avg_ms"]),
-                            pct=_fmt_pct(dns["fail_rate"] or 0)))
+        parts.append(i18n.t("health.measure.dns", lang, ms=_fmt_ms(dns["avg_ms"], lang),
+                            pct=_fmt_pct(dns["fail_rate"] or 0, lang), h=f"{hours:g}"))
     last = next((o for o in h["outages"] if not o["ongoing"]), None)
     if v["level"] != "bad":
         parts.append(i18n.t("health.last_outage", lang, text=outage_text(last, lang, tz))
@@ -584,13 +585,13 @@ def verdict_text(v: dict, h: dict, lang: str, tz=None) -> dict:
     return {"title": title, "text": " ".join(parts)}
 
 
-def _fmt_ms(ms: float) -> str:
-    return str(round(ms)) if ms >= 10 else f"{ms:.1f}"
+def _fmt_ms(ms: float, lang: str = "en") -> str:
+    return i18n.num(ms, lang, 0 if ms >= 10 else 1)
 
 
-def _fmt_pct(x: float) -> str:
+def _fmt_pct(x: float, lang: str = "en") -> str:
     p = 100 * x
-    return f"{p:.1f}" if 0 < p < 10 else str(round(p))
+    return i18n.num(p, lang, 1 if 0 < p < 10 else 0)
 
 
 def report(db, lang: str = i18n.DEFAULT, hours: float = 24, tz=None, env: dict | None = None) -> dict:
@@ -616,7 +617,7 @@ def report(db, lang: str = i18n.DEFAULT, hours: float = 24, tz=None, env: dict |
     probe = settings.get(db, env or {}, "health.internet_probe")
     return {
         "now": h["now"], "hours": hours, "tz": activity.tz_label(tz), "demo": store.is_demo(db),
-        "verdict": {**v, **verdict_text(v, h, lang, tz)},
+        "verdict": {**v, **verdict_text(v, h, lang, tz, hours)},
         "gateway": h["gateway"],
         "internet": {**h["internet"], "configured": bool(probe), "target": probe or ""},
         "dns": {k: h["dns"][k] for k in ("measured", "queries", "fails", "fail_rate", "avg_ms",

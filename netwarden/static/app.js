@@ -180,6 +180,17 @@ const S = {
 // a value that already ends in "." ("59 Min.") at the end of a sentence: no "Min.."
 function tpl(s, o) { return s.replace(/[{](\w+)[}](\.?)/g, (m, k, dot) => (o && k in o ? String(o[k]) + (dot && String(o[k]).endsWith('.') ? '' : dot) : m)); }
 function T(key, o) { return tpl(key in S.L ? S.L[key] : key, o); }
+// Round 10d: a text about a count `n` - the language's plural form, picked with
+// Intl.PluralRules (the same CLDR categories as i18n.tn on the server): `key_one`, `_few`,
+// `_many` when the locale has that form, else `key`. {n} = the formatted count unless `o` has one.
+const PLURALS = {};
+function TN(key, n, o) {
+  let cat = 'other';
+  try { cat = (PLURALS[S.lang] = PLURALS[S.lang] || new Intl.PluralRules(S.lang)).select(Number(n) || 0); } catch (e) { /* no Intl: the base text */ }
+  const k = key + '_' + cat;
+  return T(cat !== 'other' && k in S.L ? k : key, Object.assign({ n: fmt.num(n) }, o));
+}
+// a list the language's way ("a, b", "a、b") - the server's list_sep, so both sides agree
 let F = null;
 // Stage G: dates and times in netwarden's zone (the one its hour charts, nights and
 // bedtimes use), so a browser in another zone never shows two different "23:00"s
@@ -405,7 +416,7 @@ function heatmap(a) {
 function queryBars(trend) {
   if (!trend || !trend.length) return '';
   const max = Math.max(1, ...trend.map(x => x.queries));
-  return html`<div class="bars">${trend.map(x => html`<div class="b" title="${T('ui.trend_bar', { day: fmt.day(x.day), queries: fmt.num(x.queries), blocked: fmt.num(x.blocked) })}">
+  return html`<div class="bars">${trend.map(x => html`<div class="b" title="${TN('ui.trend_bar', x.queries, { day: fmt.day(x.day), queries: fmt.num(x.queries), blocked: fmt.num(x.blocked) })}">
     <div class="col"><i style="--h:${Math.round(100 * x.queries / max)}%"></i></div><span>${fmt.day(x.day)}</span></div>`)}</div>`;
 }
 function bwBars(trend) {
@@ -709,7 +720,7 @@ function healthTile() {
   const h = S.data.health;
   if (!h) return tileA('#/health', T('app.h.tile'), '—', '');
   const lvl = h.verdict.level;
-  return tileA('#/health', T('app.h.tile'), T('app.h.state.' + lvl), T('app.h.outages_n', { n: fmt.num(h.outages_7d) }), 'lvl-' + lvl);
+  return tileA('#/health', T('app.h.tile'), T('app.h.state.' + lvl), TN('app.h.outages_n', h.outages_7d), 'lvl-' + lvl);
 }
 function privacySummary(n) {
   const p = S.data.privacy;
@@ -775,6 +786,7 @@ function devCols() {
 }
 function badges(d) {
   const b = [];
+  if (d.is_self) b.push(html`<span class="tag">${T('app.d.this_computer')}</span>`);   // netwarden's own machine (round 10d: never in the data's words)
   if (d.threat_count) b.push(html`<span class="tag tag-threat">${icon('i-alert')}${fmt.num(d.threat_count)}</span>`);
   if (d.risky_ports) b.push(html`<span class="tag tag-exposure">${T('ui.tag_exposure')}</span>`);
   if (d.upnp_risky) b.push(html`<span class="tag tag-upnp">${T('app.tag_upnp')}</span>`);
@@ -1034,7 +1046,7 @@ function viewActivity() {
       ${card({ key: 'night', icon: 'i-moon', title: T('ui.tag_night'), body: night.length ? html`<ul class="att-list">${night.map(attItem)}</ul>` : empty('i-moon', T('app.act.no_unusual'), '', true) })}
       ${card({ key: 'people', icon: 'i-user', title: T('app.act.people'), body: people.length ? html`<ul class="rows">${people.map(p => html`<li data-key="${p.owner}">
           <span class="grow"><strong>${p.owner}</strong><div class="muted" style="font-size:var(--fs-xs)">${ownerDevices(p).join(T('list_sep'))}</div>
-          <div class="muted" style="font-size:var(--fs-xs)">${T('app.act.person_line', { queries: fmt.num(p.queries), night: fmt.pct(p.queries_7d ? p.night_queries_7d / p.queries_7d : 0) })}</div></span>
+          <div class="muted" style="font-size:var(--fs-xs)">${TN('app.act.person_line', p.queries, { queries: fmt.num(p.queries), night: fmt.pct(p.queries_7d ? p.night_queries_7d / p.queries_7d : 0) })}</div></span>
           <button type="button" class="btn sm ghost" data-act="filter-owner" data-v="${p.owner}">${T('app.act.show_devices')}</button></li>`)}</ul>`
         : empty('i-user', T('app.act.no_people'), T('app.act.no_people_hint')) })}
       ${card({ key: 'hours', cls: 'span2', icon: 'i-devices', title: T('app.act.devices'), body: active.length ? html`<div class="tbl-wrap"><table class="tbl">
@@ -1084,7 +1096,7 @@ function weekMetric(label, m, fmtv, pts) {
   if (!m) return '';
   const delta = pts != null ? m.pts : m.pct;
   const dir = delta == null || delta === 0 ? '' : (delta > 0 ? 'up' : 'down');
-  const d = delta == null ? '' : (pts != null ? T('app.fam.pts', { n: (delta > 0 ? '+' : '') + delta }) : (delta > 0 ? '+' : '') + fmt.num(delta) + '%');
+  const d = delta == null ? '' : (pts != null ? TN('app.fam.pts', Math.abs(delta), { n: (delta > 0 ? '+' : '') + fmt.num(delta) }) : (delta > 0 ? '+' : '') + fmt.num(delta) + '%');
   return html`<div class="tile wk"><div class="k">${label}</div><div class="v">${keepUnit(fmtv(m.this))}</div>
     <div class="d">${d ? html`<span class="delta ${dir}">${d}</span> · ` : ''}${T('app.fam.last_week', { v: keepUnit(fmtv(m.last)) })}</div></div>`;
 }
@@ -1372,7 +1384,7 @@ function viewPeople() {
         : card({ key: 'none', cls: 'span2', body: empty('i-user', T('app.ppl.none'), T('app.ppl.none_hint')) })}
       ${card({ key: 'shared', icon: 'i-home', title: T('app.ppl.shared'), body: html`${r.shared.devices.length ? devList(r.shared.devices) : ''}
         <div class="hint">${T('app.ppl.shared_hint')}</div>` })}
-      ${card({ key: 'unassigned', icon: 'i-devices', title: T('app.ppl.unassigned_title'), body: html`<p style="margin-top:0">${T('app.ppl.unassigned', { n: fmt.num(r.unassigned) })}</p>
+      ${card({ key: 'unassigned', icon: 'i-devices', title: T('app.ppl.unassigned_title'), body: html`<p style="margin-top:0">${TN('app.ppl.unassigned', r.unassigned)}</p>
         <a class="btn sm ghost" href="#/devices">${T('app.ppl.assign_in_devices')}</a>` })}
     </div>`;
 }
@@ -1541,7 +1553,7 @@ async function deletePerson(id, undoing) {
   try {
     const j = await postJSON('/api/people/delete', { id });
     if (S.ppl.id && +S.ppl.id === id) go('#/people');
-    toast(undoing ? T('app.toast.undone') : T('app.ppl.deleted', { name: j.deleted.name, n: fmt.num(j.deleted.devices) }),
+    toast(undoing ? T('app.toast.undone') : TN('app.ppl.deleted', j.deleted.devices, { name: j.deleted.name }),
           undoing ? {} : { undo: () => postJSON('/api/people/restore', { undo: j.undo }).then(() => { toast(T('app.toast.undone')); afterPeopleChange(); }).catch(fail) });
     afterPeopleChange();
   } catch (e) { fail(e); }
@@ -1554,7 +1566,7 @@ function assignWho(value) {
 async function assignDevices(macs, value) {
   if (!macs.length || value === '-') return;
   const pid = value.startsWith('p:') ? +value.slice(2) : null;
-  const what = macs.length === 1 ? devName(macs[0]) : T('app.ppl.n_devices', { n: fmt.num(macs.length) });
+  const what = macs.length === 1 ? devName(macs[0]) : TN('app.ppl.n_devices', macs.length);
   return assignItems(macs.map(mac => ({ mac, person: pid, shared: value === 'shared' })), T('app.ppl.assigned', { what, who: assignWho(value) }));
 }
 async function assignItems(items, msg, undoing) {
@@ -1593,7 +1605,7 @@ function presDisable(id) {
 function presForget(id) {
   const p = personById(id); if (!p) return;
   openConfirm({ icon: 'i-alert', title: T('app.pres.forget_title', { name: p.name }), text: T('app.pres.forget_text'), ok: T('app.pres.forget'), danger: true,
-                run: () => postJSON('/api/presence/forget', { id }).then(j => { toast(T('app.pres.forgotten', { n: fmt.num(j.deleted) })); afterPeopleChange(); }).catch(fail) });
+                run: () => postJSON('/api/presence/forget', { id }).then(j => { toast(TN('app.pres.forgotten', j.deleted)); afterPeopleChange(); }).catch(fail) });
 }
 function presDevice(id, mac) {
   const p = S.ppl.det && S.ppl.det.id === id ? S.ppl.det : null; if (!p) return;
@@ -1656,7 +1668,7 @@ function sparkline(series, label) {
 function dnsDays(days) {
   if (!days || !days.length) return html`<div class="hint">${T('app.h.no_dns')}</div>`;
   const maxMs = Math.max(1, ...days.map(d => d.avg_ms || 0)), maxF = Math.max(0.01, ...days.map(d => d.fail_rate || 0));
-  const row = (cls, f) => html`<div class="bars h-bars ${cls}">${days.map(d => html`<div class="b" title="${T('app.h.dns_bar', { day: fmt.day(d.date), ms: ms(d.avg_ms), pct: fmt.pct(d.fail_rate || 0), n: fmt.num(d.queries) })}">
+  const row = (cls, f) => html`<div class="bars h-bars ${cls}">${days.map(d => html`<div class="b" title="${TN('app.h.dns_bar', d.queries, { day: fmt.day(d.date), ms: ms(d.avg_ms), pct: fmt.pct(d.fail_rate || 0) })}">
     <div class="col"><i style="--h:${f(d).toFixed(1)}%"></i></div><span>${fmt.day(d.date)}</span></div>`)}</div>`;
   return html`<div class="hint">${T('app.h.dns_speed')}</div>${row('speed', d => 100 * (d.avg_ms || 0) / maxMs)}
     <div class="hint">${T('app.h.dns_fail')}</div>${row('fail', d => 100 * (d.fail_rate || 0) / maxF)}`;
@@ -1769,7 +1781,7 @@ function sugItem(it) {
       <span class="sug-ic">${icon(PILLAR_ICON[it.pillar] || 'i-bulb')}</span>
       <span class="sug-t"><span class="sug-title">${it.status === 'done' && !it.waiting ? it.done_title : it.title}</span>
         <span class="sug-meta"><span class="tag ${SEV_TAG[it.severity]}">${it.severity_name}</span><span class="muted">${it.pillar_name}</span>
-          ${it.points && it.status !== 'done' ? html`<span class="tag tag-ok">${T('app.sug.points', { n: it.points })}</span>` : ''}${sugStatus(it)}</span></span>
+          ${it.points && it.status !== 'done' ? html`<span class="tag tag-ok">${TN('app.sug.points', it.points)}</span>` : ''}${sugStatus(it)}</span></span>
       ${icon('i-chev', 'chev')}</button>
     ${open ? sugBody(it) : ''}</li>`;
 }
@@ -1813,7 +1825,7 @@ function scoreCard() {
         <div class="spark-x"><span>${fmt.day(trend[0].day)}</span><span>${fmt.day(trend[trend.length - 1].day)}</span></div></div>` : ''}
     </div>
     ${(sc.raise || []).length ? html`<div class="hint">${T('app.score.how')}</div><ul class="rows">${sc.raise.map(r => html`<li data-key="r-${r.id}">
-      <span class="grow"><a href="#/suggestions" data-act="sug-goto" data-id="${r.id}">${r.title}</a></span><span class="tag tag-ok">${T('app.sug.points', { n: r.gain })}</span></li>`)}</ul>` : ''}
+      <span class="grow"><a href="#/suggestions" data-act="sug-goto" data-id="${r.id}">${r.title}</a></span><span class="tag tag-ok">${TN('app.sug.points', r.gain)}</span></li>`)}</ul>` : ''}
     <details class="score-why" data-persist="score-why"${persistOpen('score-why')}><summary>${T('app.score.breakdown')}</summary>
       <ul class="rows">${(sc.deductions || []).map((d, i) => html`<li data-key="d-${i}"><span class="grow">${d.text}</span><span class="num muted">−${d.gain}</span></li>`)}</ul>
       <div class="hint">${sc.note}</div></details>` });
@@ -1916,11 +1928,11 @@ function questionsFor() {
 }
 // "Looked up: Devices · Living-room TV · Domains (last 24 h)" - expandable to the exact
 // JSON each lookup returned (what the AI received: the redacted text when names are hidden).
-function toolText(x) { return x.label + (x.detail && x.detail.length ? ' (' + x.detail.join(', ') + ')' : ''); }
+function toolText(x) { return x.label + (x.detail && x.detail.length ? ' (' + x.detail.filter(Boolean).join(x.sep || T('list_sep')) + ')' : ''); }
 function toolChips(m, i) {
   const tools = m.tools || [];
   if (!tools.length) return '';
-  return html`<details class="tools" data-key="tl${i}"><summary>${icon('i-search')}<span><b>${T('app.ai.looked_up')}:</b> ${tools.map(toolText).join(' · ')}</span></summary>
+  return html`<details class="tools" data-key="tl${i}"><summary>${icon('i-search')}<span><b>${m.toolsHead || T('app.ai.looked_up')}:</b> ${tools.map(toolText).join(' · ')}</span></summary>
     ${tools.map((x, j) => html`<div class="toolres" data-key="t${j}">
       <div class="toolhead"><span class="tag">${x.label}</span>${x.detail && x.detail.length ? html` <span class="muted">${x.detail.join(' · ')}</span>` : ''}
         ${x.error ? html` <span class="tag tag-warn">${T('app.ai.tool_failed')}</span>` : ''}${x.truncated ? html` <span class="tag">${T('app.ai.tool_truncated')}</span>` : ''}</div>
@@ -1949,8 +1961,8 @@ function cleanUsage(d) {
            budget: { state: ['none', 'ok', 'near', 'over'].includes(b.state) ? b.state : 'none', share: num0(b.share), spent: num0(b.spent), limit: num0(b.limit) } };
 }
 function usageHead(u) {
-  if (u.local) return T('app.usage.note_local', { n: fmt.num(u.tokens) });
-  return u.cost_usd == null ? T('app.usage.note_tokens', { n: fmt.num(u.tokens) }) : T('app.usage.note', { n: fmt.num(u.tokens), cost: usd(u.cost_usd) });
+  if (u.local) return TN('app.usage.note_local', u.tokens);
+  return u.cost_usd == null ? TN('app.usage.note_tokens', u.tokens) : TN('app.usage.note', u.tokens, { cost: usd(u.cost_usd) });
 }
 function priceHint(u) {
   if (u.local) return T('app.usage.local_hint');
@@ -1989,7 +2001,12 @@ function chatMsg(m, i) {
 // the earlier ones stay as they were (an answer cannot be re-worded without asking again),
 // under one small note naming their language; their follow-up chips (old-language
 // questions) are hidden. Everything netwarden itself labels follows the new language.
-function langName(code) { const l = ((S.meta && S.meta.languages) || []).find(x => x.code === code); return l ? l.name : code; }
+// a language's name IN the page's language ("英文" in zh-Hant, "English" in en); the
+// language's own name when the browser cannot say it
+function langName(code) {
+  try { const n = new Intl.DisplayNames([S.lang], { type: 'language' }).of(code); if (n && n !== code) return n; } catch (e) { /* no Intl.DisplayNames */ }
+  const l = ((S.meta && S.meta.languages) || []).find(x => x.code === code); return l ? l.name : code;
+}
 const otherLang = m => !!(m.lang && m.lang !== S.lang);
 function chatLog() {
   const c = S.chat;
@@ -2095,7 +2112,7 @@ function saveChat() {
   try {
     sessionStorage.setItem(CHAT_KEY, JSON.stringify({ db: dbId(), ctx: c.ctx, draft: c.draft,
       messages: c.messages.map(m => ({ role: m.role, content: m.content, mode: m.mode, lang: m.lang, err: m.err, stopped: m.stopped,
-        tools: m.tools, notes: m.notes, suggest: m.suggest, sugHead: m.sugHead, usage: m.usage })) }));
+        tools: m.tools, toolsHead: m.toolsHead, notes: m.notes, suggest: m.suggest, sugHead: m.sugHead, usage: m.usage })) }));
   } catch (e) { /* storage full or disabled: the chat just won't survive a reload */ }
 }
 // Stored chat / notified keys belong to one database (a demo and a real DB can share the
@@ -2107,7 +2124,8 @@ function loadChat() {
     if (!j || !Array.isArray(j.messages) || j.db !== dbId()) return;
     S.chat.messages = j.messages.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
       .map(m => ({ role: m.role, content: m.content, mode: m.mode, lang: typeof m.lang === 'string' ? m.lang.slice(0, 20) : undefined, err: typeof m.err === 'string' ? m.err : undefined, stopped: !!m.stopped,
-        tools: cleanTools(m.tools), notes: strList(m.notes, 4), suggest: strList(m.suggest, 6),
+        tools: cleanTools(m.tools), toolsHead: typeof m.toolsHead === 'string' ? m.toolsHead.slice(0, 80) : undefined,
+        notes: strList(m.notes, 4), suggest: strList(m.suggest, 6),
         sugHead: typeof m.sugHead === 'string' ? m.sugHead.slice(0, 500) : undefined, usage: cleanUsage(m.usage) }));
     S.chat.ctx = j.ctx && typeof j.ctx.mac === 'string' ? { mac: j.ctx.mac, name: String(j.ctx.name || j.ctx.mac) } : null;
     S.chat.draft = typeof j.draft === 'string' ? j.draft : '';
@@ -2117,7 +2135,10 @@ function loadChat() {
 function strList(a, n) { return Array.isArray(a) ? a.filter(s => typeof s === 'string').slice(0, n).map(s => s.slice(0, 500)) : undefined; }
 function cleanTool(x) {
   if (!x || typeof x.label !== 'string') return null;
-  return { label: x.label.slice(0, 80), detail: strList(x.detail, 6) || [], sent: String(x.sent || '').slice(0, 8192),
+  // the label and detail are in the answer's language: so is their separator, set by
+  // readAnswer() and kept with the message ("Alerts (Behavior change, last 24 h)" stays English)
+  const sep = typeof x.sep === 'string' && x.sep.length <= 4 ? x.sep : undefined;
+  return { label: x.label.slice(0, 80), detail: strList(x.detail, 6) || [], sep, sent: String(x.sent || '').slice(0, 8192),
            local: !!x.local, redacted: !!x.redacted, truncated: !!x.truncated, error: typeof x.error === 'string' ? x.error.slice(0, 60) : undefined };
 }
 function cleanTools(a) { const t = Array.isArray(a) ? a.slice(0, 10).map(cleanTool).filter(Boolean) : []; return t.length ? t : undefined; }
@@ -2149,8 +2170,9 @@ async function readAnswer(r, reply, alert) {
       if (!d) continue;
       if (ev.event === 'status') { reply.status = cleanTool(Object.assign({ sent: '' }, d)); renderChatSoon(); }
       else if (ev.event === 'tool') {
-        const x = cleanTool(d); reply.status = null;
-        if (x) { (reply.tools = reply.tools || []).length < 10 && reply.tools.push(x); renderChatSoon(); }
+        const x = cleanTool(Object.assign({}, d, { sep: T('list_sep') })); reply.status = null;
+        // "Looked up:" heads a line in the answer's language: it stays in it, like the separator
+        if (x) { reply.toolsHead = reply.toolsHead || T('app.ai.looked_up'); (reply.tools = reply.tools || []).length < 10 && reply.tools.push(x); renderChatSoon(); }
       } else if (ev.event === 'note') {
         if (typeof d.text === 'string' && !(reply.notes || []).includes(d.text)) { (reply.notes = reply.notes || []).push(d.text.slice(0, 500)); renderChatSoon(); }
       } else if (ev.event === 'suggest') {
@@ -2351,7 +2373,7 @@ function checkNotify() {
 }
 // One notification: a toast in the page and, when switched on, a system notification.
 function announce(it) {
-  const title = it.many ? T('app.notify.many', { n: fmt.num(it.many.length) }) : (it.summary ? it.summary.title : T('app.notify.msg_title', { tag: it.tag }));
+  const title = it.many ? TN('app.notify.many', it.many.length) : (it.summary ? it.summary.title : T('app.notify.msg_title', { tag: it.tag }));
   const body = it.many ? it.many.slice(0, 3).map(x => x.plain).join('\n')
     : (it.summary ? [it.summary.text].concat(it.summary.items.slice(0, 3).map(x => x.text)).join('\n') : it.plain);
   const href = it.many ? '#/inbox' : (it.href || (it.mac ? devHref(it.mac) : '#/security'));
@@ -2763,7 +2785,7 @@ function aiTestResult() {
   if (!r.ok) return html`<div class="ai-test" role="status"><span class="tag tag-bad">${icon('i-alert')}${T('app.ai.test_failed', { error: r.error_text || '' })}</span>
     ${r.error ? html`<div class="hint">${r.error}</div>` : ''}</div>`;
   return html`<div class="ai-test" role="status">
-    <div><span class="tag tag-ok">${icon('i-check')}${T('app.ai.test_ok', { server: r.server, n: fmt.num(r.models.length), ms: fmt.num(r.latency_ms) })}</span></div>
+    <div><span class="tag tag-ok">${icon('i-check')}${TN('app.ai.test_ok', r.models.length, { server: r.server, ms: fmt.num(r.latency_ms) })}</span></div>
     ${r.model ? (r.model_found === false ? html`<div class="hint warn">${T('app.ai.test_missing', { model: r.model })}</div>` : '')
               : html`<div class="hint">${T('app.ai.test_no_model')}</div>`}
     ${r.reply != null ? html`<div class="hint">${T('app.ai.test_reply', { reply: r.reply })}</div>` : ''}
@@ -2871,9 +2893,9 @@ function renderPreview() {
   if (p.err) body = empty('i-alert', p.err);
   else if (!r) body = html`<div class="skel w8"></div><div class="skel box"></div>`;
   else if (!r.sends) body = html`${destTag('none')}${empty('i-eye-off', T(r.ai_mode === 'offline' ? 'app.ai.preview_offline' : 'app.ai.preview_nodata'), '', true)}`;
-  else body = html`<div class="prev-dest">${destTag(r.destination, r.provider, r.redact)} <span class="muted">${r.model} · ${T('app.ai.preview_size', { n: fmt.num(r.chars || 0) })}</span></div>
+  else body = html`<div class="prev-dest">${destTag(r.destination, r.provider, r.redact)} <span class="muted">${r.model} · ${TN('app.ai.preview_size', r.chars || 0)}</span></div>
     <p class="hint">${T(r.redact ? 'app.ai.preview_redacted' : 'app.ai.preview_plain')}</p>
-    ${r.tokens ? html`<p class="hint">${icon('i-gauge')} ${T('app.usage.preview_tokens', { n: fmt.num(r.tokens.total), system: fmt.num(r.tokens.system), tools: fmt.num(r.tokens.tools),
+    ${r.tokens ? html`<p class="hint">${icon('i-gauge')} ${TN('app.usage.preview_tokens', r.tokens.total, { system: fmt.num(r.tokens.system), tools: fmt.num(r.tokens.tools),
       context: fmt.num(r.tokens.context), history: fmt.num(r.tokens.history) })}</p>` : ''}
     ${r.legend && r.legend.length ? html`<details class="prev-legend"><summary>${T('app.ai.preview_legend')} (${fmt.num(r.legend.length)})</summary>
       <div class="tbl-wrap"><table class="tbl"><tbody>${r.legend.map(l => html`<tr><td><code>${l.token}</code></td><td>${l.real}</td></tr>`)}</tbody></table></div></details>` : ''}
@@ -2899,7 +2921,7 @@ const UNDO_MAX = 20;
 const snoozeDays = () => (S.data.inbox && S.data.inbox.snooze_days) || 7;
 function inboxItems() { const r = S.data.inbox; return r ? r.items.filter(it => !S.inbox.gone.has(it.id)) : []; }
 function inboxCount() { return inboxItems().length; }
-function inboxLabel(act) { return T(INBOX_LABEL[act], { n: snoozeDays() }); }
+function inboxLabel(act) { return TN(INBOX_LABEL[act], snoozeDays()); }
 // What a key means for one item: "Got it" on a suggestion is "Done"; "Dismiss" on an alert is "Got it".
 function inboxAction(it, act) {
   if (it.kind === 'suggestion') { if (act === 'ack') act = 'done'; } else if (act === 'dismiss') act = 'ack';
@@ -2926,10 +2948,10 @@ function inboxRow(it, i) {
 // the rest (mute, snooze, dismiss, tune) one tap further, each with what it does in words.
 function inboxActs(it) {
   const main = it.actions.filter((a, i) => i === 0 || a === 'trust'), rest = it.actions.filter(a => !main.includes(a));
-  const btn = (a, cls) => html`<button type="button" class="btn sm ${cls || 'ghost'}" data-act="ib-do" data-v="${a}" data-id="${it.id}" title="${T('app.inbox.hint.' + a, { n: snoozeDays() })} (${INBOX_KEY[a]})">${inboxLabel(a)}</button>`;
+  const btn = (a, cls) => html`<button type="button" class="btn sm ${cls || 'ghost'}" data-act="ib-do" data-v="${a}" data-id="${it.id}" title="${TN('app.inbox.hint.' + a, snoozeDays())} (${INBOX_KEY[a]})">${inboxLabel(a)}</button>`;
   const tune = it.why && it.why.tune;
   const more = rest.length || tune ? html`<details class="ib-more" data-key="more-${it.id}"><summary class="btn sm quiet">${icon('i-more')}${T('app.inbox.more_actions')}</summary>
-      <ul class="ib-more-l">${rest.map(a => html`<li>${btn(a)}<span class="muted">${T('app.inbox.hint.' + a, { n: snoozeDays() })}</span></li>`)}
+      <ul class="ib-more-l">${rest.map(a => html`<li>${btn(a)}<span class="muted">${TN('app.inbox.hint.' + a, snoozeDays())}</span></li>`)}
         ${tune ? html`<li>${tuneBtn(tune, it.name)}<span class="muted">${T('app.inbox.hint.tune')}</span></li>` : ''}</ul></details>` : '';
   return html`<div class="att-a">${main.map(a => btn(a))}${more}</div>`;
 }
@@ -2957,11 +2979,11 @@ function viewInbox() {
   const picked = items.filter(it => I.picked.has(it.id));
   const all = picked.length === items.length;
   const bulk = picked.length ? html`<div class="ib-bulk" data-key="bulk" role="toolbar" aria-label="${T('app.inbox.bulk')}">
-      <b>${T('app.inbox.n_selected', { n: fmt.num(picked.length) })}</b>
+      <b>${TN('app.inbox.n_selected', picked.length)}</b>
       ${['ack', 'trust', 'mute', 'snooze', 'dismiss'].filter(a => picked.some(it => inboxAction(it, a) && (a !== 'dismiss' || it.kind === 'suggestion'))).map(a =>
         html`<button type="button" class="btn sm" data-act="ib-bulk" data-v="${a}">${inboxLabel(a)}</button>`)}
       <button type="button" class="btn sm quiet" data-act="ib-none">${T('app.inbox.clear')}</button></div>` : '';
-  return html`${phead(T('app.nav.inbox'), T(urgent ? 'app.inbox.sub_urgent' : 'app.inbox.sub', { n: fmt.num(items.length), urgent: fmt.num(urgent) }),
+  return html`${phead(T('app.nav.inbox'), TN(urgent ? 'app.inbox.sub_urgent' : 'app.inbox.sub', items.length, { urgent: fmt.num(urgent) }),
       html`${demoPill()}<button type="button" class="btn sm ghost" data-act="${all ? 'ib-none' : 'ib-all'}">${T(all ? 'app.inbox.clear' : 'app.inbox.select_all')}</button>`)}
     ${quietCards()}
     ${bulk}
@@ -2994,8 +3016,8 @@ async function inboxDo(act, list) {
   S.inbox.gone.clear();
   S.inbox.undo.push(done); if (S.inbox.undo.length > UNDO_MAX) S.inbox.undo.shift();
   const first = todo[0];
-  const what = todo.length === 1 ? first[0].title : T('app.inbox.n_items', { n: fmt.num(todo.length) });
-  done.close = toast(T('app.inbox.toast.' + first[1], { what, n: snoozeDays() }), { undo: () => inboxUndo(done) });
+  const what = todo.length === 1 ? first[0].title : TN('app.inbox.n_items', todo.length);
+  done.close = toast(TN('app.inbox.toast.' + first[1], snoozeDays(), { what }), { undo: () => inboxUndo(done) });
   render(); inboxFocus(); refresh();
 }
 // "u" undoes the newest action; a toast's Undo button undoes exactly the action it reported.
@@ -3053,7 +3075,7 @@ function closeConfirm(yes) {
 function confirmCheck() {
   if (S.meta.demo) { toast(T('exposure.demo_refused'), { kind: 'err' }); return; }
   if (S.meta.remote) { toast(T('app.pair.admin_only'), { kind: 'err' }); return; }
-  openConfirm({ icon: 'i-port', title: T('app.sec.check_all'), text: T('app.sec.check_confirm', { n: fmt.num(devices().length) }),
+  openConfirm({ icon: 'i-port', title: T('app.sec.check_all'), text: TN('app.sec.check_confirm', devices().length),
                 ok: T('app.sec.check_start'), run: () => startCheck(null) });
 }
 
@@ -3136,7 +3158,7 @@ function quietStatus() {
   const q = S.data.notify && S.data.notify.quiet;
   if (!q) return '';
   return html`<p class="quiet-state${q.active ? ' on' : ''}">${icon(q.active ? 'i-moon' : 'i-bell')}<span>${q.text}${q.days_text ? html` <span class="muted">· ${q.days_text}</span>` : ''}
-    ${q.active && S.data.notify.held ? html`<br><span class="muted">${T('app.quiet.held', { n: fmt.num(S.data.notify.held) })}</span>` : ''}</span></p>`;
+    ${q.active && S.data.notify.held ? html`<br><span class="muted">${TN('app.quiet.held', S.data.notify.held)}</span>` : ''}</span></p>`;
 }
 function setDirty(sec) { return setItems(sec).some(it => it.key in S.set.form && String(S.set.form[it.key]) !== String(it.value == null ? '' : it.value)); }
 function setCard(sec) {
@@ -3202,7 +3224,7 @@ async function testConn(n) {
 // would change first (POST /api/backup/preview), "replace" asks once more.
 const BK_MAX = 1000000;   // bytes; the server takes 1 MB per request
 function bkSection(s) {
-  const n = (k, cls) => (s[k] ? html`<span class="${cls}">${T('app.bk.' + k, { n: fmt.num(s[k]) })}</span>` : '');
+  const n = (k, cls) => (s[k] ? html`<span class="${cls}">${TN('app.bk.' + k, s[k])}</span>` : '');
   const nothing = !s.add && !s.change && !s.remove;
   // a settings line names the setting the way the Settings page does
   const what = x => (s.key === 'settings' ? (aiItem(x.what).label || x.what) : x.what);
@@ -3220,7 +3242,7 @@ function backupCard() {
       ${B.doc ? html`<div class="field"><span id="bk-mode-l">${T('app.bk.mode')}</span><div class="seg" role="group" aria-labelledby="bk-mode-l">${['merge', 'replace'].map(m =>
         html`<button type="button" data-act="bk-mode" data-v="${m}" aria-pressed="${String(B.mode === m)}">${T('app.backup.mode_' + m)}</button>`)}</div>
         <span class="hint">${T('app.bk.mode_' + B.mode + '_hint')}</span></div>` : ''}
-      ${B.pv ? html`<h3 class="hint">${B.pv.changes ? T('app.bk.would', { n: fmt.num(B.pv.changes) }) : T('app.bk.nothing')}</h3>
+      ${B.pv ? html`<h3 class="hint">${B.pv.changes ? TN('app.bk.would', B.pv.changes) : T('app.bk.nothing')}</h3>
         <ul class="plain bk-list">${B.pv.sections.map(bkSection)}</ul>` : ''}
       <div class="ai-acts">
         ${B.pv && B.pv.changes ? html`<button type="button" class="btn${B.mode === 'replace' ? ' danger' : ''}" data-act="bk-apply"${B.busy ? ' disabled' : ''}>${icon('i-check')}${T('app.bk.restore')}</button>` : ''}
@@ -3258,7 +3280,7 @@ function bkApply() {
     try {
       const r = await postJSON('/api/restore', { backup: B.doc, mode: B.mode });
       S.set.bk = null; S.hidden.clear();
-      toast(T('app.bk.restored', { n: fmt.num(r.changes) }));
+      toast(TN('app.bk.restored', r.changes));
       loadAI(); loadChoices(); refresh();
     } catch (e) { B.err = errText(e); B.busy = false; render(); }
   };
@@ -3595,7 +3617,7 @@ async function wzPoll() {
     if (j.state === 'running') { render(); setTimeout(wzPoll, 1500); return; }
     if (S.setup.scanToast) {   // started from the palette: say how it went
       S.setup.scanToast = false;
-      if (j.state === 'done') toast(T('app.wz.scan_done', { n: fmt.num(j.found || 0) })); else toast(T('ui.check_failed', { error: j.error || '?' }), { kind: 'err' });
+      if (j.state === 'done') toast(TN('app.wz.scan_done', j.found || 0)); else toast(T('ui.check_failed', { error: j.error || '?' }), { kind: 'err' });
     }
     loadSetup(); refresh();
   } catch (e) { sc.state = 'error'; fail(e); }
@@ -3628,9 +3650,9 @@ function wzBody(step, s) {
     if (!s.scan.available) return html`<p>${T('app.wz.scan_intro')}</p><p class="hint warn">${icon('i-alert')} ${T('app.wz.scan_off.' + (s.scan.reason || 'no_lan'))}</p>`;
     return html`<p>${T('app.wz.scan_intro')}</p>
       <div class="ai-acts"><button type="button" class="btn" data-act="wz-scan"${sc && sc.state === 'running' ? ' disabled' : ''}>${icon('i-search')}${T(sc && sc.state === 'running' ? 'app.wz.scanning' : 'app.wz.scan')}</button></div>
-      <p aria-live="polite">${sc && sc.state === 'done' ? html`<span class="tag tag-ok">${icon('i-check')}${T('app.wz.scan_done', { n: fmt.num(sc.found || 0) })}</span>`
+      <p aria-live="polite">${sc && sc.state === 'done' ? html`<span class="tag tag-ok">${icon('i-check')}${TN('app.wz.scan_done', sc.found || 0)}</span>`
         : (sc && sc.state === 'error' ? html`<span class="tag tag-bad">${T('ui.check_failed', { error: sc.error || '?' })}</span>` : '')}</p>
-      <p class="hint">${s.scan.last_ok_ts ? T('app.wz.scan_last', { when: fmt.rel(s.scan.last_ok_ts), n: fmt.num(s.devices) }) : T('app.wz.scan_note')}</p>
+      <p class="hint">${s.scan.last_ok_ts ? TN('app.wz.scan_last', s.devices, { when: fmt.rel(s.scan.last_ok_ts) }) : T('app.wz.scan_note')}</p>
       ${s.scan.wsl ? html`<p class="hint">${icon('i-bulb')} ${T('discovery.wsl_few')}</p>` : ''}`;
   }
   if (step === 'language') {
@@ -3917,7 +3939,7 @@ function mapSvg(m) {
   const ordered = L.groups.map(g => m.items.filter(it => it.group === g.key).sort((a, c) => coll.compare(dname(a.d), dname(c.d))));
   const shown = m.items.filter(it => it.shown).length;
   return html`<svg id="mapsvg" class="mapsvg${label ? ' zoomed' : ''}" viewBox="${b.x} ${b.y} ${b.w} ${b.h}" tabindex="0" role="group"
-      aria-label="${T('app.map.aria', { n: fmt.num(shown) })}" aria-describedby="maphelp">
+      aria-label="${TN('app.map.aria', shown)}" aria-describedby="maphelp">
     <g id="mapvp" transform="translate(${v.x} ${v.y}) scale(${v.k})">
       <g class="mlinks" aria-hidden="true">
         <line x1="0" y1="0" x2="${L.internet.x}" y2="${L.internet.y}" class="up"/>
@@ -3926,7 +3948,7 @@ function mapSvg(m) {
       <a class="mhub inet" href="#/health" data-key="inet" transform="translate(${L.internet.x} ${L.internet.y})" aria-label="${T('app.map.internet_label', { state: S.data.health ? (S.data.health.verdict.title || T('app.h.state.' + S.data.health.verdict.level)) : '' })}">
         <circle class="ring lvl-${S.data.health ? S.data.health.verdict.level : 'idle'}" r="27"/><circle class="core" r="23"/>
         <use class="mic" href="#i-globe" x="-12" y="-12" width="24" height="24"/><text class="mhlabel" y="42">${T('app.map.internet')}</text></a>
-      <a class="mhub router hyg-${R.status}" href="#/security" data-key="router" aria-label="${T('app.map.router_label', { name: R.name, hygiene: R.summary, n: fmt.num(R.ports) })}">
+      <a class="mhub router hyg-${R.status}" href="#/security" data-key="router" aria-label="${TN('app.map.router_label', R.ports, { name: R.name, hygiene: R.summary })}">
         <circle class="ring" r="31"/><circle class="core" r="27"/>
         <use class="mic" href="#t-network" x="-14" y="-14" width="28" height="28"/>
         <text class="mhlabel" y="47">${R.name}</text></a>
@@ -4054,7 +4076,7 @@ function mapTip(a) {
   const p = personOf(d), it = mapModel().items.find(x => x.id === d.mac);
   const lines = [[dname(d), 'b'], [[d.type_info && d.type_info.type_name, p ? p.name : (d.shared ? T('app.ppl.shared') : '')].filter(Boolean).join(' · ')],
     [it ? mapStatusName(it.status) : ''], [(d.ips || []).join(', ')],
-    [d.bandwidth ? '↓ ' + fmt.bytes(d.bandwidth.rx_bytes) + ' · ↑ ' + fmt.bytes(d.bandwidth.tx_bytes) : T('app.map.lookups', { n: fmt.num(d.queries || 0) })]];
+    [d.bandwidth ? '↓ ' + fmt.bytes(d.bandwidth.rx_bytes) + ' · ↑ ' + fmt.bytes(d.bandwidth.tx_bytes) : TN('app.map.lookups', d.queries || 0)]];
   tip.replaceChildren(...lines.filter(([t]) => t).map(([t, b]) => { const el = document.createElement(b ? 'strong' : 'div'); el.textContent = t; return el; }));
   const r = a.getBoundingClientRect(), br = box.getBoundingClientRect();
   tip.hidden = false;
@@ -4088,7 +4110,7 @@ function mapCard() {
     body: html`<a class="mapmini" href="#/map" aria-label="${T('app.map.open')}">
       <span class="mm-i">${icon('i-globe')}</span><span class="mm-l"></span><span class="mm-i">${icon('t-network')}</span><span class="mm-l"></span>
       <span class="mm-d">${list.slice(0, 12).map(d => html`<i class="${d.online ? 'on' : ''}${alerting.has(d.mac) ? ' al' : ''}"></i>`)}</span></a>
-      <div class="hint">${T('app.map.card', { n: fmt.num(list.length), online: fmt.num(online) })}${n ? ' · ' + T('app.map.card_alert', { n: fmt.num(n) }) : ''}</div>` });
+      <div class="hint">${TN('app.map.card', list.length, { online: fmt.num(online) })}${n ? ' · ' + T('app.map.card_alert', { n: fmt.num(n) }) : ''}</div>` });
 }
 
 // ---------------------------------------------------------------------------------------
@@ -4269,7 +4291,7 @@ const groupHere = () => GROUP_OF[S.base] || 'overview';
 function navLink(g, prefix) {
   const i = GROUPS.findIndex(x => x[0] === g), n = groupCount(g), label = groupLabel(g), first = groupPages(g)[0];
   return html`<a href="#/${first}" data-key="${(prefix || '') + 'g-' + g}"${groupHere() === g ? html` aria-current="page"` : ''} title="${label} (${i + 1})"${prefix ? html` role="menuitem"` : ''}>
-    ${icon(GROUP_ICON[g])}<span class="lbl">${label}</span>${n ? html`<span class="count${isFlash('nav:' + (g === 'network' ? 'health' : g)) ? ' flash' : ''}" aria-label="${T(GROUP_COUNT_LABEL[g], { n })}">${n}</span>` : ''}</a>`;
+    ${icon(GROUP_ICON[g])}<span class="lbl">${label}</span>${n ? html`<span class="count${isFlash('nav:' + (g === 'network' ? 'health' : g)) ? ' flash' : ''}" aria-label="${TN(GROUP_COUNT_LABEL[g], n)}">${n}</span>` : ''}</a>`;
 }
 function navLinks() { return GROUPS.map(x => navLink(x[0])); }
 // The pages of the current place as tabs above the page (none for a one-page place)
@@ -4278,7 +4300,7 @@ function subTabs() {
   if (pages.length < 2 || !pages.includes(S.base)) return '';
   return html`<nav class="subtabs" data-key="subtabs-${g}" aria-label="${T('app.subnav', { section: groupLabel(g) })}">${pages.map(p => {
     const n = navCount(p);
-    return html`<a href="#/${p}" data-key="st-${p}"${S.base === p ? html` aria-current="page"` : ''}>${icon(SEC_ICON[p])}<span>${T('app.nav.' + p)}</span>${n ? html`<span class="count${p === 'suggestions' ? ' info' : ''}${isFlash('nav:' + p) ? ' flash' : ''}" aria-label="${T(NAV_COUNT_LABEL[p], { n })}">${n}</span>` : ''}</a>`;
+    return html`<a href="#/${p}" data-key="st-${p}"${S.base === p ? html` aria-current="page"` : ''}>${icon(SEC_ICON[p])}<span>${T('app.nav.' + p)}</span>${n ? html`<span class="count${p === 'suggestions' ? ' info' : ''}${isFlash('nav:' + p) ? ' flash' : ''}" aria-label="${TN(NAV_COUNT_LABEL[p], n)}">${n}</span>` : ''}</a>`;
   })}</nav>`;
 }
 // Phones: four places in the bottom bar, the others behind "More" (Esc closes it).
@@ -4809,10 +4831,21 @@ function toast(msg, opts) {
   }
   const x = document.createElement('button'); x.type = 'button'; x.setAttribute('aria-label', T('app.close')); x.textContent = '✕';
   x.onclick = close; t.appendChild(x);
+  t._close = close;
   box.appendChild(t);
   while (box.children.length > 4) box.firstChild.remove();
   resume();
   return close;
+}
+// After a language change: a passing note in the old language goes, a toast with Undo stays
+// (its action still works) with its buttons in the new language.
+function relabelToasts() {
+  Array.from(($('#toasts') || { children: [] }).children).forEach(t => {
+    const u = t.querySelector('button.u');
+    if (!u) { if (t._close) t._close(); return; }
+    u.textContent = T('app.toast.undo'); u.title = T('app.toast.undo') + ' (Ctrl+Z)';
+    const x = t.querySelector('button:not(.u)'); if (x) x.setAttribute('aria-label', T('app.close'));
+  });
 }
 function fail(e) {
   if (e && e.demo) { demoNote(e.message); return; }   // the static demo said no: a note, not an error
@@ -4948,15 +4981,38 @@ async function setLang(code, persist) {
   if (was && was !== S.lang) { forgetTags(); chatLangChanged(was, oldPrefill); }
   if (persist) { try { localStorage.setItem(LANG_KEY, S.lang); } catch (e) { /* private mode */ } }
   applyStatic(); render();                  // chrome switches instantly; data follows
-  S.look.key = null; if (drawerOpen() && S.route.name !== 'device') { S.look = { key: S.route.name + ':' + S.route.arg }; loadLookup(); }
-  loadChoices(); refresh();
-  if (S.since.r) sinceLoad();   // "since your last visit": its texts are the server's too
-  // pages whose server texts were fetched once per visit: fetch them in the new language
-  if (['system', 'settings', 'welcome'].includes(S.base)) loadAI();
+  S.look.key = null;
   S.push.log = {};   // the delivery logs' texts are localized too: an open one is fetched again
-  if (S.base === 'settings') { loadTuning(); loadPush(); if (S.push.logOpen != null) pushLogLoad(S.push.logOpen); }
+  langChanged();
   return true;
 }
+// Round 10d: everything that holds the old language's words, and how it gets the new ones -
+// ONE list, run by setLang() (tests/js/lang_switch_test.js runs it against page states).
+// [what, when (is it on screen or cached?), how]. Each source is asked once, only when it
+// is shown or kept; pages fetched per visit (family, people, hygiene, a device drawer) come
+// with refresh(), others (tuning, pairing, setup) again on their next visit.
+const FRESH_PAGES = ['system', 'settings', 'welcome'];
+const LANG_DEPS = [
+  ['lookup drawer', () => drawerOpen() && S.route.name !== 'device', () => { S.look = { key: S.route.name + ':' + S.route.arg }; loadLookup(); }],
+  ['choices', () => true, () => loadChoices()],
+  ['datasets', () => true, () => refresh()],
+  ['since', () => !!S.since.r, () => sinceLoad()],
+  // the settings list: its page AND the palette's Settings entries (round 10d: a list kept
+  // from another page stayed in the old language)
+  ['settings list', () => !!S.meta && !S.meta.remote && (!!S.ai.s || FRESH_PAGES.includes(S.base)),
+   () => loadAI().then(() => { if (S.pal.open) renderPalette(); })],
+  ['pairing', () => FRESH_PAGES.includes(S.base), () => loadPair()],
+  ['setup', () => S.base === 'welcome', () => loadSetup()],
+  ['tuning', () => S.base === 'settings', () => loadTuning()],
+  ['channels', () => S.base === 'settings', () => loadPush()],
+  ['delivery log', () => S.base === 'settings' && S.push.logOpen != null, () => pushLogLoad(S.push.logOpen)],
+  ['channel preview', () => !!S.push.ed, () => pushPreview(true)],
+  ['palette', () => S.pal.open, () => { S.pal.remote = null; renderPalette(); }],
+  ['shortcuts', () => S.keys.open, () => keysBody()],
+  ['toasts', () => true, () => relabelToasts()],
+];
+function langChanged() { LANG_DEPS.forEach(([, when, run]) => { if (when()) run(); }); }
+// end LANG_DEPS
 
 // Stage G: netwarden did not answer before the page could start (it stopped, is
 // restarting, or answered with an error). The words come with index.html (#off-texts, every
@@ -5092,7 +5148,7 @@ function paletteActions(q) {
   if (q) a('ask', T('app.palette.ask', { q: S.pal.q.trim() }), 'i-spark', () => openChat({ draft: S.pal.q.trim() }), { hint: T('app.palette.ask_hint'), kw: q, always: true });
   a('act:refresh', T('app.refresh'), 'i-refresh', refresh, { keys: ['R'] });
   const unread = inboxItems().filter(it => it.kind !== 'suggestion' && it.actions.includes('ack'));
-  if (unread.length) a('act:read-all', T('app.palette.read_all', { n: fmt.num(unread.length) }), 'i-check', () => inboxDo('ack', unread), { kw: 'inbox read got it ack' });
+  if (unread.length) a('act:read-all', TN('app.palette.read_all', unread.length), 'i-check', () => inboxDo('ack', unread), { kw: 'inbox read got it ack' });
   a('act:pause', T('app.palette.pause'), 'i-bell', pauseAlerts, { kw: 'mute snooze quiet 1h hour' });
   if (local && !S.meta.demo) a('act:scan', T('app.palette.scan'), 'i-wifi', paletteScan, { kw: 'scan discover sweep devices' });
   a('act:csv', T('ui.export_csv'), 'i-download', () => download('/api/export/devices.csv'), { kw: 'csv excel' });
@@ -5135,10 +5191,10 @@ function langNames(code) {
 function peopleEntries() {
   const out = persons().map(p => {
     const n = devices().filter(d => d.owner === p.name).length;
-    return palEntry('person:' + p.id, 'ppl', p.name, { ic: 'i-user', hint: T('app.palette.n_devices', { n: fmt.num(n) }), run: () => go('#/people/' + p.id), kw: T('app.ppl.person') });
+    return palEntry('person:' + p.id, 'ppl', p.name, { ic: 'i-user', hint: TN('app.palette.n_devices', n), run: () => go('#/people/' + p.id), kw: T('app.ppl.person') });
   });
   const shared = devices().filter(d => d.shared).length;
-  if (shared) out.push(palEntry('shared', 'ppl', T('app.ppl.shared'), { ic: 'i-family', hint: T('app.palette.n_devices', { n: fmt.num(shared) }), run: () => go('#/people') }));
+  if (shared) out.push(palEntry('shared', 'ppl', T('app.ppl.shared'), { ic: 'i-family', hint: TN('app.palette.n_devices', shared), run: () => go('#/people') }));
   Array.from(new Set(devices().map(d => d.room).filter(Boolean))).forEach(r =>
     out.push(palEntry('room:' + r, 'ppl', T('app.palette.room', { room: r }), { ic: 'i-home', kw: T('app.room'), run: () => go('#/devices?room=' + enc(r)) })));
   return out;
@@ -5289,7 +5345,7 @@ function renderPalette() {
   inp.setAttribute('aria-expanded', String(items.length > 0));
   if (items.length) inp.setAttribute('aria-activedescendant', 'pi-' + S.pal.sel); else inp.removeAttribute('aria-activedescendant');
   const sel = $('#pi-' + S.pal.sel); if (sel) sel.scrollIntoView({ block: 'nearest' });
-  const n = T('app.palette.n_results', { n: fmt.num(items.length) });
+  const n = TN('app.palette.n_results', items.length);
   clearTimeout(S.pal.sayT);
   S.pal.sayT = setTimeout(() => { const c = $('#palcount'); if (c && S.pal.open && c.textContent !== n) c.textContent = n; }, 400);
 }

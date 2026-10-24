@@ -95,13 +95,16 @@ OFFLINE_ENV = "NETWARDEN_OFFLINE_AI"   # "1" = never call the LLM (--offline-ai)
 ADDON_ENV = "NETWARDEN_ADDON"          # "1" = set by the Home Assistant add-on (addon.env_from_options)
 
 
-def human_bytes(n: float) -> str:
-    """1234567 -> '1.2 MB' (decimal units, like ISPs and ntopng use)."""
+def human_bytes(n: float, lang: str | None = None) -> str:
+    """1234567 -> '1.2 MB' (decimal units, like ISPs and ntopng use); with `lang`, the
+    number the language's way ("1,2 MB" in German) - text a person reads."""
+    def f(v, d):
+        return i18n.num(v, lang, d) if lang else f"{v:.{d}f}"
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1000:
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+            return f"{f(n, 0)} {unit}" if unit == "B" else f"{f(n, 1)} {unit}"
         n /= 1000
-    return f"{n:.1f} TB"
+    return f"{f(n, 1)} TB"
 
 
 def human_bps(n: float) -> str:
@@ -553,7 +556,7 @@ def _snapshot(db, hours: float, top: int) -> dict:
             "name": label or hostname,
             "label": label,
             "hostname": hostname,
-            "vendor": r["vendor"] or ("this machine" if r["is_self"] else None),
+            "vendor": r["vendor"] or None,
             "is_self": bool(r["is_self"]),
             "ips": [ip for ip in (r["ips"] or "").split(",") if ip],
             "mac": mac,

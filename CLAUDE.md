@@ -108,7 +108,7 @@ docs/     USER docs (English + .zh-TW where present): install, home_assistant, b
           private_ai (Ollama/LM Studio, redaction, settings API), lan (M), identification (N), family (F),
           health (H), people (P), report (X); images/ = README shots (demo data, DPR 1, <300 KB) + social-preview.png (= og-image)
 docs/dev/ CONTRIBUTOR notes: stages (D1/D2/E2/F), stagex (X), stage_t (T), stagev3 (V3), stageq (Q), ai_tools (A),
-          usability (U), accessibility (G), hardening (K), ha_addon (H), static_demo (W), bandwidth_investigation (why ntopng)
+          usability (U), accessibility (G), hardening (K), ha_addon (H), static_demo (W), i18n (plurals), bandwidth_investigation
 root      README.md + README.zh-TW.md, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, CHANGELOG, THIRD_PARTY_NOTICES;
           .github/ (ci.yml, docker.yml, pages.yml = manual live demo, issue/PR templates, dependabot); docs in English + zh-Hant ONLY
 ha-addon/ config.yaml DOCS/README/CHANGELOG translations/en.yaml icon+logo.png; repository.yaml at the root (one repo)
@@ -190,8 +190,10 @@ that PEER = HA admin; X-Ingress-Path/X-Forwarded-* read from it only. URLs are b
 relative manifest/css, sw.js scope): NEVER add a root-absolute URL to static/. Tests: tests/ingress_proxy.py.
 **Static demo (round 9 W)** - docs/dev/static_demo.md: `DEMO` in app.js ONLY with data-static-demo + static/demo.js (`NWDemo.file` = builder
 `static_name`, fixture-pinned); a NEW GET the page makes = add it to the builder (`PAGES`/`DEVICE_GETS`) or it 404s there; DEMO never POSTs.
-10b/10c (details in static_demo.md): `demo.HOUSEHOLDS`; ONE copy of data, `lastTag[k]` per dataset + `forgetTags()` on setLang (never per
-language); chat messages carry `lang`; counts ONLY via `i18n.tn` (+ `<key>_one` with `{n}`); demo ISP outage ends >= `demo.ISP_CLEAR` ago.
+10b/10c: `demo.HOUSEHOLDS`; `lastTag[k]` per dataset + `forgetTags()` on setLang; chat messages carry `lang`; outage ends >= `demo.ISP_CLEAR` ago.
+**Plurals + language switch (10d)** - docs/dev/i18n.md: count = base + `_one` (+ ru `_few`/`_many`) via `i18n.tn()`/`TN()`, 2+ counts = "A: {a} · B: {b}";
+checker plural_missing|forms|hedge (never-1 -> PLURAL_FIXED); `_one` drops `{n}` only where one == 1 (NOT ru/fr/pt-BR/hi); `i18n.num()`,
+`list_sep`; new server text = `refresh()` or a `LANG_DEPS` row. A new chat chip in app.js = `ai_intents.CHIPS` (or offline_ai.SUMMARY_CHIPS) - test-enforced.
 **Push (round 10 N)** - docs/notifications.md: tables push_channels (secrets column: NEVER in API/log/backup; log = shown_endpoint)
 / push_outbox (UNIQUE(channel,key) = dedupe + queue; new/resumed channel PRIMED) / push_log; admin-only `web.PUSH_GETS|POSTS`;
 levels minimal|standard|detailed (scrub() + hashed id below detailed); env `NETWARDEN_NOTIFY_<n>_*` read-only (absent = row STALE, never
@@ -217,14 +219,14 @@ python3 -m netwarden notify list | test NAME | send-digest [--daily]   # push ch
 NETWARDEN_HEADLESS=1 NETWARDEN_HOST=0.0.0.0|<lan-ip> python3 -m netwarden run   # container mode; --version
 bash scripts/adguard_dev.sh start; python3 scripts/dns_traffic.py   # DEV AdGuard (DNS :5354, API :3000); never for users
 python3 -m netwarden.web --db data/demo.db; python3 -m netwarden.alerts --db data/demo.db  # must work; perf_db.py / soak.py: perf
-python3 -m unittest discover -s tests          # 1372 tests, all must pass (+ node tests/js/*.js)
+python3 -m unittest discover -s tests          # 1412 tests, all must pass (+ node tests/js/*.js)
 ```
 Windows: `scripts\start_windows.cmd` (:8787) / `start_demo_windows.cmd` (:8788). Manual checks: own `--offline-ai` server on 127.0.0.1:8799, COPY of the demo DB.
 
 ## Status & next steps
 
 **Done:** MVP, i18n, demo; stages C P D1 D2 E1/E2 V L N F H M X V3 V4 Q A T U G K + review fixes; rounds 6 D/H/O/P/E, 7 L/C, 8 R,
-CI1, 9 V/U/X/W, 10 N/P, 10b, 10c (tests `test_round*.py`). Standing rules from them: third-party code only in netwarden/vendor/, downloaded
+CI1, 9 V/U/X/W, 10 N/P, 10b, 10c, 10d (tests `test_round*.py`). Standing rules from them: third-party code only in netwarden/vendor/, downloaded
 data (manuf, threat feed) never in tree/wheel/image; AI cost (docs/dev/ai_cost.md): no cache breakpoint on the snapshot, `usage.Guard`
 before EVERY tool round, re-check prices + bump PRICES_CHECKED; ghcr.io/liming-ting/netwarden + netwarden-addon (lower case);
 AGPL-3.0-or-later, LICENSE hash-pinned (NEVER edit, no per-file headers), `netwarden.LICENSE|SOURCE_URL|COPYRIGHT` = ONE source; images

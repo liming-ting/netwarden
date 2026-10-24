@@ -433,7 +433,7 @@ def render(st: dict, lang: str, dashboard: str | None = None,
     db = st["db"]
     lines += ["",
               ai_line(st["ai"], lang),
-              tr("db", size=brain.human_bytes(db["size_bytes"]), devices=db["devices"],
+              tr("db", size=brain.human_bytes(db["size_bytes"], lang), devices=db["devices"],
                  dns=db["dns_events"], traffic=db["traffic_samples"]),
               tr("db_range", oldest=(db["oldest_ts"] or "—")[:16].replace("T", " "),
                  newest=(db["newest_ts"] or "—")[:16].replace("T", " "),

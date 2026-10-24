@@ -90,7 +90,7 @@ class InboxAndPeopleTests(unittest.TestCase):
         # main = the first action + trust; the rest (and Tune) in the disclosure, each explained
         self.assertIn("i === 0 || a === 'trust'", body)
         self.assertIn("<details class=\"ib-more\"", body)
-        self.assertIn("T('app.inbox.hint.' + a", body)
+        self.assertIn("TN('app.inbox.hint.' + a", body)
         self.assertIn("tuneBtn(tune, it.name)", body)
 
     def test_add_a_person_from_a_device(self):

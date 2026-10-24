@@ -498,7 +498,7 @@ def cmd_backup(argv) -> int:
         return 0
     out.write_bytes(body)
     n = sum(len(v) for v in doc["data"].values())
-    print(i18n.t("cli.backup.saved", lang, path=out, n=n))
+    print(i18n.tn("cli.backup.saved", n, lang, path=out))
     return 0
 
 

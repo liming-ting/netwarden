@@ -239,9 +239,9 @@ def spike_text(a: dict, lang: str) -> str:
     """One localized sentence for a bandwidth spike (dashboard, digest, offline AI)."""
     from netwarden.brain import human_bytes   # brain imports alerts
     # a whole number (>= SPIKE_RATIO by construction): no decimal separator to localize
-    return i18n.t("alert.bw_spike", lang, name=a["name"], total=human_bytes(a["total"]),
-                  rx=human_bytes(a["rx_bytes"]), tx=human_bytes(a["tx_bytes"]),
-                  h=int(a["hours"]), typical=human_bytes(a["typical"]), ratio=round(a["ratio"]))
+    return i18n.t("alert.bw_spike", lang, name=a["name"], total=human_bytes(a["total"], lang),
+                  rx=human_bytes(a["rx_bytes"], lang), tx=human_bytes(a["tx_bytes"], lang),
+                  h=int(a["hours"]), typical=human_bytes(a["typical"], lang), ratio=round(a["ratio"]))
 
 
 def compute(db, recent_hours: float = 24.0, baseline_days: float = 7.0) -> dict:

@@ -341,8 +341,8 @@ def weekday_names(lang: str) -> list:
 
 def explain(item: dict, lang: str) -> str:
     """One localized sentence for an unusual-hours finding."""
-    return i18n.t("activity.night_line", lang, name=item["name"], window=item["window"],
-                  n=item["night_queries"])
+    return i18n.tn("activity.night_line", item["night_queries"], lang, name=item["name"],
+                   window=item["window"])
 
 
 def summary_text(g: dict, lang: str) -> str:

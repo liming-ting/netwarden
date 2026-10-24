@@ -133,9 +133,11 @@ N_BASELINE = 4      # baseline events emitted per normal domain (presence, not v
 # Optional keys:
 #   "recent_only": True        -> brand-new device; events only in the last 24h
 #   "new_in_recent": [entries] -> services that appear ONLY in the last 24h (a change)
+# vendors are brand names only (as an OUI lookup gives them): the device type names the
+# role in every language (round 10d review: "Shenzhen (generic IP camera)" in a zh-Hant drawer)
 DEVICES = [
     {
-        "ip": "192.168.1.1", "mac": "50:c7:bf:3e:21:54", "vendor": "TP-Link (router)",
+        "ip": "192.168.1.1", "mac": "50:c7:bf:3e:21:54", "vendor": "TP-Link",
         "hostname": "tplinkwifi.net", "randomized": False, "is_self": False,
         "profile": [
             ("pool.ntp.org", "A", 4, False, "always"),
@@ -143,7 +145,7 @@ DEVICES = [
         ],
     },
     {
-        "ip": "192.168.1.13", "mac": "d8:3a:dd:1a:2b:3c", "vendor": "Dell Inc. (this machine)",
+        "ip": "192.168.1.13", "mac": "d8:3a:dd:1a:2b:3c", "vendor": "Dell Inc.",
         "hostname": "DESKTOP-7Q2K9LM", "randomized": False, "is_self": True,
         "profile": [
             ("github.com", "A", 9, False, "day"),
@@ -197,7 +199,7 @@ DEVICES = [
         ],
     },
     {
-        "ip": "192.168.1.31", "mac": "8c:79:f5:0b:cd:12", "vendor": "Samsung Electronics (Smart TV)",
+        "ip": "192.168.1.31", "mac": "8c:79:f5:0b:cd:12", "vendor": "Samsung Electronics",
         "hostname": "Samsung-TV", "randomized": False, "is_self": False,
         "profile": [
             # Stage D1 privacy story: heavy vendor telemetry (ACR = it reports what is on
@@ -211,7 +213,7 @@ DEVICES = [
         ],
     },
     {
-        "ip": "192.168.1.41", "mac": "fc:65:de:33:77:aa", "vendor": "Amazon Technologies (Echo)",
+        "ip": "192.168.1.41", "mac": "fc:65:de:33:77:aa", "vendor": "Amazon Technologies",
         "hostname": "echo-kitchen", "randomized": False, "is_self": False,
         # Stage D1: the Echo normally phones home every hour, but went silent in DNS
         # QUIET_HOURS ago while discovery still sees it online (hard-coded DNS / DoH?).
@@ -224,7 +226,7 @@ DEVICES = [
         ],
     },
     {
-        "ip": "192.168.1.51", "mac": "a0:43:b0:9f:21:5e", "vendor": "Shenzhen (generic IP camera)",
+        "ip": "192.168.1.51", "mac": "a0:43:b0:9f:21:5e", "vendor": "Shenzhen",
         "hostname": "ipcam", "randomized": False, "is_self": False,
         "profile": [
             ("xmeye.net", "A", 38, False, "always"),
@@ -234,7 +236,7 @@ DEVICES = [
         ],
     },
     {
-        "ip": "192.168.1.61", "mac": "3c:2a:f4:88:19:d0", "vendor": "Hewlett Packard (printer)",
+        "ip": "192.168.1.61", "mac": "3c:2a:f4:88:19:d0", "vendor": "Hewlett Packard",
         "hostname": "HP-OfficeJet", "randomized": False, "is_self": False,
         "profile": [
             ("hpeprint.com", "A", 4, False, "day"),
@@ -242,7 +244,7 @@ DEVICES = [
         ],
     },
     {
-        "ip": "192.168.1.71", "mac": "70:9e:29:55:3b:81", "vendor": "Sony Interactive (PS5)",
+        "ip": "192.168.1.71", "mac": "70:9e:29:55:3b:81", "vendor": "Sony Interactive",
         "hostname": "PS5", "randomized": False, "is_self": False,
         "profile": [
             ("playstation.net", "A", 10, False, "day"),
@@ -257,14 +259,14 @@ DEVICES = [
     # Stage D1: a streaming stick that discovery sees but the DNS filter never has -
     # it uses its own hard-coded resolver.
     {
-        "ip": "192.168.1.35", "mac": "f4:f5:d8:6c:21:0e", "vendor": "Google (Chromecast)",
+        "ip": "192.168.1.35", "mac": "f4:f5:d8:6c:21:0e", "vendor": "Google",
         "hostname": "Chromecast-Living", "randomized": False, "is_self": False,
         "no_dns": True,
         "profile": [],
     },
     # CHANGE #1: a brand-new device joined the network in the last day.
     {
-        "ip": "192.168.1.55", "mac": "5c:e9:1e:7a:44:b8", "vendor": "Roborock (robot vacuum)",
+        "ip": "192.168.1.55", "mac": "5c:e9:1e:7a:44:b8", "vendor": "Roborock",
         "hostname": "roborock-vacuum", "randomized": False, "is_self": False,
         "recent_only": True,
         "profile": [

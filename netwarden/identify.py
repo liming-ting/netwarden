@@ -1141,12 +1141,13 @@ def main(argv=None, prog=None) -> int:
         if s["ok"]:
             kinds = i18n.t("list_sep", lang).join(
                 f"{n} × {i18n.t('devtype.' + k, lang)}" for k, n in sorted(s["kinds"].items()))
-            print(tr(part, hosts=s["hosts"], devices=s["devices"], kinds=kinds or "—"))
+            print(i18n.tn("cli.identify." + part, s["hosts"], lang, hosts=s["hosts"], devices=s["devices"],
+                          kinds=kinds or "—"))
         else:
             print(tr("failed", part=i18n.t("status.src." + part, lang), error=s["error"]))
     rd = summary.get("rdns") or {}
     if rd.get("asked"):
-        print(tr("rdns", names=rd["names"], asked=rd["asked"]))
+        print(i18n.tn("cli.identify.rdns", rd["asked"], lang, names=rd["names"], asked=rd["asked"]))
     u = summary.get("upnp") or {}
     print(tr("upnp_ok", n=u.get("mappings", 0)) if u.get("available")
           else tr("upnp_none"))

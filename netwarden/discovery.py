@@ -319,7 +319,8 @@ def main(argv=None, prog=None) -> int:
 
     if args.update_vendors:   # the ONLY way discovery goes online (opt-in, download only)
         try:
-            print(i18n.t("cli.scan.vendors_updated", lang, n=f"{update_manuf():,}"))
+            n = update_manuf()
+            print(i18n.tn("cli.scan.vendors_updated", n, lang, n=i18n.num(n, lang)))
         except OSError as e:
             print(t("vendors_failed", error=health.sanitize_error(e)), file=sys.stderr)
             return 1
@@ -332,9 +333,10 @@ def main(argv=None, prog=None) -> int:
 
     print(t("iface", iface=iface))
     print(t("self", ip=own_ip))
-    print(t("network", net=net, n=f"{net.num_addresses - 2:,}"))
+    print(i18n.tn("cli.scan.network", net.num_addresses - 2, lang, net=net,
+                  n=i18n.num(net.num_addresses - 2, lang)))
     table = load_manuf()
-    print(t("vendor_db", n=f"{len(table):,}"))
+    print(i18n.tn("cli.scan.vendor_db", len(table), lang, n=i18n.num(len(table), lang)))
     if not MANUF_CACHE.exists():
         print(t("vendors_hint"))
 
@@ -362,7 +364,7 @@ def main(argv=None, prog=None) -> int:
             vendor = vendor[:27] + "…"
         print(f"{d['ip']:<16}{mac:<20}{pad(vendor, 30)}{d['hostname']}")
     print()
-    print(t("found", n=len(devices), s=f"{time.time() - t0:.1f}"))
+    print(t("found", n=len(devices), s=i18n.num(time.time() - t0, lang, 1)))
     if wslnet.is_wsl():
         print(i18n.t("discovery.wsl_few", lang))
     return 0

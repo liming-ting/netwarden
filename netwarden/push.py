@@ -654,7 +654,7 @@ def _digest_lines(db, env, kind: str, lang: str, tz) -> list:
     if sc.get("score") is not None:
         lines.append(i18n.t("push.daily.score", lang, score=sc["score"]))
     c = inbox.report(db, lang, env)["counts"]
-    lines.append(i18n.t("push.daily.open", lang, n=c["total"], urgent=c["urgent"]))
+    lines.append(i18n.tn("push.daily.open", c["total"], lang, urgent=c["urgent"]))
     return lines
 
 
@@ -685,7 +685,7 @@ def render(db, env: dict | None, ch: dict, data: dict, tz=None, now: datetime | 
         if kind in ("weekly", "daily"):
             body = i18n.t("push.min.digest", lang)
         elif count > 1:
-            body = i18n.t("push.min.many", lang, n=count)
+            body = i18n.tn("push.min.many", count, lang)
         else:
             body = i18n.t("push.min.one", lang, category=_cat(category, lang))
         msg.update(title="netwarden", body=body)

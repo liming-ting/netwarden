@@ -238,7 +238,7 @@ def localize_summary(db, s: dict, lang: str, tz=None) -> dict:
     return {"id": s["id"], "win": s["win"], "key": f"quiet:{s['win']}", "start_ts": s["start_ts"],
             "end_ts": s["end_ts"], "created_at": s["created_at"], "seen": bool(s["seen_at"]),
             "count": len(lines), "title": i18n.t("quiet.summary_title", lang, span=span),
-            "text": i18n.t("quiet.summary_text", lang, n=len(lines)),
+            "text": i18n.tn("quiet.summary_text", len(lines), lang),
             "items": lines[:SUMMARY_LINES], "more": max(0, len(lines) - SUMMARY_LINES)}
 
 

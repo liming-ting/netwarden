@@ -25,9 +25,9 @@ from netwarden import alerts, i18n, naming, services, threatintel
 MAX_LINES = 5   # per section; the rest becomes "...and N more"
 
 
-def _human_bytes(n: float) -> str:
+def _human_bytes(n: float, lang: str) -> str:
     from netwarden.brain import human_bytes  # brain imports us; import lazily
-    return human_bytes(n)
+    return human_bytes(n, lang)
 
 
 def _name(d: dict, lang: str) -> str:
@@ -41,6 +41,14 @@ def _capped(ctx, lines: list) -> list:
 
 
 # --- sections ----------------------------------------------------------------
+
+def _head(ctx, key: str) -> str:
+    """A section heading that names its period (round 10d): "New devices (last 24 h)" - the
+    assistant's "Anything new this week?" lists 7 days, so the two never seem to disagree."""
+    h = ctx["snap"]["window_hours"]
+    when = i18n.t("aitool.win.24h" if h == 24 else "aitool.win.1h" if h == 1 else "", ctx["lang"])
+    return i18n.t("offline.head_when", ctx["lang"], head=ctx["tr"](key), when=when) if when else ctx["tr"](key)
+
 
 def section_threats(ctx) -> list:
     th = ctx["alerts"]["threats"]
@@ -64,7 +72,7 @@ def section_new_devices(ctx) -> list:
             info.append(f"IP {d['ip']}")
         lines.append(tr("new_device_line", name=d["name"],
                         info=i18n.t("digest.sep", ctx["lang"]).join(info) or "—"))
-    return [tr("new_devices")] + _capped(ctx, lines)
+    return [_head(ctx, "new_devices")] + _capped(ctx, lines)
 
 
 def section_changes(ctx) -> list:
@@ -73,7 +81,7 @@ def section_changes(ctx) -> list:
         return []
     tr, sep = ctx["tr"], i18n.t("list_sep", ctx["lang"])
     lines = [tr("change_line", name=c["name"], services=sep.join(c["new_services"])) for c in bc]
-    return [tr("changes")] + _capped(ctx, lines)
+    return [_head(ctx, "changes")] + _capped(ctx, lines)
 
 
 def section_exposure(ctx) -> list:
@@ -135,7 +143,7 @@ def section_people(ctx) -> list:
     for d in ctx["snap"]["devices"]:
         if d.get("owner"):
             mine.setdefault(d["owner"], []).append(names.get(d["mac"]) or d["name"] or d["mac"])
-    lines = [tr("person_line", owner=p["owner"], devices=sep.join(mine.get(p["owner"]) or p["devices"]),
+    lines = [i18n.tn("offline.person_line", p["queries"], ctx["lang"], owner=p["owner"], devices=sep.join(mine.get(p["owner"]) or p["devices"]),
                 queries=p["queries"],
                 night=round(100 * p["night_queries_7d"] / p["queries_7d"]) if p["queries_7d"] else 0)
              for p in people]
@@ -217,13 +225,13 @@ def section_bandwidth(ctx) -> list:
         return []
     with_bw = [d for d in snap["devices"] if "bandwidth" in d]
     top = sorted(with_bw, key=lambda d: -(d["bandwidth"]["rx_bytes"] + d["bandwidth"]["tx_bytes"]))
-    lines = [tr("bw_line", name=_name(d, lang), rx=_human_bytes(d["bandwidth"]["rx_bytes"]),
-                tx=_human_bytes(d["bandwidth"]["tx_bytes"])) for d in top[:3]]
+    lines = [tr("bw_line", name=_name(d, lang), rx=_human_bytes(d["bandwidth"]["rx_bytes"], lang),
+                tx=_human_bytes(d["bandwidth"]["tx_bytes"], lang)) for d in top[:3]]
     # A device that SENDS far more than it receives is unusual (cameras, backups, leaks).
     for d in top:
         bw = d["bandwidth"]
         if bw["tx_bytes"] > 2 * bw["rx_bytes"] and bw["tx_bytes"] >= 100e6:
-            lines.append(tr("upload_note", name=_name(d, lang), tx=_human_bytes(bw["tx_bytes"])))
+            lines.append(tr("upload_note", name=_name(d, lang), tx=_human_bytes(bw["tx_bytes"], lang)))
     return [tr("bandwidth", h=f"{snap['window_hours']:g}")] + lines
 
 
@@ -232,8 +240,8 @@ def section_blocked(ctx) -> list:
     blocked = sorted((d for d in snap["devices"] if d.get("blocked")), key=lambda d: -d["blocked"])
     if not blocked:
         return []
-    lines = [tr("blocked_line", name=_name(d, ctx["lang"]), blocked=d["blocked"],
-                queries=d["queries"]) for d in blocked[:3]]
+    lines = [i18n.tn("offline.blocked_line", d["queries"], ctx["lang"], name=_name(d, ctx["lang"]),
+                     blocked=d["blocked"], queries=d["queries"]) for d in blocked[:3]]
     return [tr("blocked")] + lines
 
 
@@ -294,7 +302,9 @@ def section_focus(ctx) -> list:
     if risky:
         lines.append(i18n.tn("offline.focus_threats", len(risky), lang, domains=sep.join(risky[:5])))
     if d.get("active_hours"):
-        lines.append(tr("focus_hours", hours=d["active_hours"]))
+        # the snapshot's hours are canonical ("07:00–12:00, 22:00–02:00", activity.hours_text):
+        # joined the language's way here, as the drawer does
+        lines.append(tr("focus_hours", hours=sep.join(d["active_hours"].split(", "))))
     return lines
 
 
@@ -306,11 +316,20 @@ def asks_about_focus(question: str | None, lang: str, focus: str | None) -> bool
     if not (question and focus):
         return False
     for code in dict.fromkeys([i18n.normalize(lang)] + i18n.CODES):
-        tpl = i18n.t("app.ask_prefill", code).replace("{mac}", focus)
-        rx = r"\s*" + r".+?".join(re.escape(p) for p in tpl.split("{name}")) + r"\s*"
-        if re.fullmatch(rx, question, re.I | re.S) is not None:
-            return True
+        # the drawer's pre-filled question, and the chat's "Is anything unusual about
+        # <device>?" chip shown while a device is in focus
+        for key in FOCUS_QUESTIONS:
+            tpl = i18n.t(key, code).replace("{mac}", focus)
+            rx = r"\s*" + r".+?".join(re.escape(p) for p in tpl.split("{name}")) + r"\s*"
+            if re.fullmatch(rx, question, re.I | re.S) is not None:
+                return True
     return False
+
+
+FOCUS_QUESTIONS = ("app.ask_prefill", "app.ai.q.device")
+# data-driven chat chips (app.js suggestions()) the summary itself answers (its privacy
+# section) - not "free-form" either
+SUMMARY_CHIPS = ("app.ai.q.trackers",)
 
 
 # the chat's own standing suggestion chips (app.js, the static demo builder): the summary
@@ -321,7 +340,8 @@ STANDING = ("app.ai.s1", "app.ai.s2", "app.ai.s3")
 def answered_here(question: str | None, lang: str, focus: str | None) -> bool:
     """Is `question` one the summary answers (no "cannot answer free-form" note)?"""
     q = (question or "").strip().casefold()
-    return (any(q == i18n.t(k, lang).strip().casefold() for k in STANDING)
+    return (any(q == i18n.t(k, code).strip().casefold() for k in STANDING + SUMMARY_CHIPS
+                for code in dict.fromkeys([i18n.normalize(lang)] + i18n.CODES))
             or asks_about_focus(question, lang, focus))
 
 

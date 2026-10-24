@@ -130,6 +130,40 @@ contain breaking changes).
   announces (as in the device list), not its vendor.
 - Demo: the made-up internet outage always ends well before the "right now" hour of the
   health card, so it no longer reports most DNS lookups failing right now.
+- Every count follows the language's singular/plural rules (CLDR; Russian one/few/many),
+  everywhere in the dashboard, answers, alerts, reports, push messages and the CLI: no more
+  "1 new devices", "1 personal devices" or hedges like "router forward(s)". Texts with
+  several counts read "Devices: 15 · Lookups: 682".
+- After a language switch the command palette (Settings results too), open lookups, the
+  delivery log, the channel preview, the shortcuts sheet and the Undo buttons change at
+  once; each source is fetched once, and only when it is on screen or kept.
+- The Network health summary says that its router and DNS figures cover the last 24 hours.
+- Offline answers agree with the pages: "Was the internet down recently?" opens with the
+  week's outages, then "Right now" with the Network health page's own verdict and numbers
+  (it used to say "All good (last 7 days)" above a list of outages, with other DNS
+  numbers); "Anything new this week?" lists the week's new devices and labels its behavior
+  changes "last 24 h", as the summary does; the summary's headings name their period.
+- The suggested question "What did <device> connect to after 23:00?" is offered only for a
+  device that had lookups then.
+- Language names in the dashboard are written in the dashboard's language; lists use the
+  language's separator (Chinese and Japanese 、, also in "Looked up" lines, which keep
+  their answer's language after a switch); numbers in server texts use the language's
+  decimal mark and digit grouping (e.g. "3,5 мс", "1.234,5").
+- The computer netwarden runs on is marked with a "this computer" tag in its language
+  instead of an English "(this machine)" in its vendor.
+- Russian, French, Portuguese and Hindi texts no longer say "once" for 21, 31, ... (or 0)
+  outages or risky lookups: the singular form keeps the number where it covers more than 1.
+- The assistant's suggestion chips get on-topic answers, the same in every language:
+  "Is the open port 23 on <device> dangerous?" explains that port (it listed the router's
+  UPnP forwards), "Who was online around 01:04 at night?" lists that night's activity (in
+  Chinese it answered who is home), and the data-usage, tracker, new-device, risky-device
+  and "anything unusual" chips no longer depend on the language's keywords.
+- "Which device is the most unusual right now?" opens with the same alert total as the
+  Overview, then "N more alerts" after that device's own.
+- Demo device vendors are brand names only (no English "(robot vacuum)" in other
+  languages); weekly highlights and the report's chart text use the language's number
+  format and list separator; earlier chat answers keep their "Looked up" heading in their
+  own language after a switch.
 
 ## [0.1.0] - 2026-10-24
 

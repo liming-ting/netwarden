@@ -125,6 +125,14 @@ def t(key: str, lang: str = DEFAULT, **kw) -> str:
     cat = _catalog()
     if lang not in cat:
         lang = normalize(lang)
+    if "n" in kw and key in _plural_bases():
+        key = plural_key(key, kw["n"], lang)   # a count text given its count: its plural form
+    return _t(key, lang, **kw)
+
+
+def _t(key: str, lang: str, /, **kw) -> str:
+    """t() without the plural choice (`lang` already a known code)."""
+    cat = _catalog()
     text = cat[lang].get(key)
     if text is None:
         text = cat.get(FALLBACK, {}).get(key, key)
@@ -138,24 +146,99 @@ def t(key: str, lang: str = DEFAULT, **kw) -> str:
     return text.format_map(_Keep(kw))
 
 
-# Which counts take a language's singular ("_one") form - CLDR's "one" category, kept to
-# the languages netwarden ships: French, Brazilian Portuguese and Hindi count 0 and 1 as
-# one, Russian 1, 21, 31 ... (not 11); the rest only 1. Languages without grammatical number
-# (zh, ja, ko, id) simply carry the same text under both keys.
-_ONE = {"fr": lambda n: n in (0, 1), "pt-BR": lambda n: n in (0, 1), "hi": lambda n: n in (0, 1),
-        "ru": lambda n: n % 10 == 1 and n % 100 != 11}
+# Plurals (round 10d): CLDR's plural categories for whole numbers, kept to the languages
+# netwarden ships (+ Polish, the usual next one). A count text is ONE base key (CLDR's
+# "other": "{n} devices") plus `<key>_one` ("{n} device") and, where the language has
+# them, `<key>_few` / `<key>_many` (Russian: 2-4 / 5-20 of a noun). The browser picks the
+# same keys with Intl.PluralRules (app.js TN()); `python3 -m netwarden.i18n --check` finds
+# count texts without them. Languages without grammatical number (zh, ja, ko, id) carry
+# the base text under `_one` too and always use the base.
+def _slavic(n: int) -> str:
+    if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14):
+        return "few"
+    return "many"
 
 
-def tn(key: str, n, lang: str = DEFAULT, **kw) -> str:
-    """t() for a text about a count `n` ({n} is filled in): `key + "_one"` when the
-    language says "1 device" rather than "2 devices" and that key exists, else `key`."""
-    code = lang if lang in _catalog() else normalize(lang)
+PLURAL_RULES = {
+    "fr": lambda n: "one" if n in (0, 1) else "other",
+    "pt-BR": lambda n: "one" if n in (0, 1) else "other",
+    "hi": lambda n: "one" if n in (0, 1) else "other",
+    "ru": lambda n: "one" if n % 10 == 1 and n % 100 != 11 else _slavic(n),
+    "pl": lambda n: "one" if n == 1 else _slavic(n),
+    "zh-Hant": lambda n: "other", "zh-Hans": lambda n: "other", "ja": lambda n: "other",
+    "ko": lambda n: "other", "id": lambda n: "other",
+}
+# the categories a language needs besides the base ("other") one
+PLURAL_FORMS = {"ru": ("one", "few", "many"), "pl": ("one", "few", "many")}
+
+
+@lru_cache(maxsize=1)
+def _plural_bases() -> frozenset:
+    """Every count text with plural forms (English has `<key>_one`)."""
+    en = _catalog().get(FALLBACK, {})
+    return frozenset(k[:-4] for k in en if k.endswith("_one") and k[:-4] in en)
+
+
+def plural_category(n, lang: str) -> str:
+    """CLDR plural category (one | few | many | other) of the whole number `n` in `lang`
+    (also "1,234" as f"{n:,}" writes it); anything else counts as "other"."""
+    if isinstance(n, str):
+        n = n.replace(",", "")
     try:
-        one = _ONE.get(code, lambda v: v == 1)(int(n))
+        v = int(n)
+        if isinstance(n, float) and n != v:
+            return "other"
     except (TypeError, ValueError):
-        one = False
-    use = key + "_one" if one and (key + "_one") in _catalog()[code] else key
-    return t(use, code, **{"n": n, **kw})
+        return "other"
+    return PLURAL_RULES.get(lang, lambda x: "one" if x == 1 else "other")(abs(v))
+
+
+def plural_key(key: str, n, lang: str) -> str:
+    """The key a count text uses for `n` in `lang`: `key_<category>` when that locale has
+    it, else the base key."""
+    code = lang if lang in _catalog() else normalize(lang)
+    cat = plural_category(n, code)
+    return key + "_" + cat if cat != "other" and (key + "_" + cat) in _catalog()[code] else key
+
+
+def tn(key: str, count, lang: str = DEFAULT, /, **kw) -> str:
+    """t() for a text about `count` ({n} = the count unless given, e.g. formatted): the
+    language's plural form of `key` ("1 device", "2 devices", Russian "2 устройства" /
+    "5 устройств")."""
+    code = lang if lang in _catalog() else normalize(lang)
+    return _t(plural_key(key, count, code), code, **{"n": count, **kw})
+
+
+def is_plural(key: str) -> bool:
+    """Is `key` a count text with plural forms (English has `key_one`)? t() given such a
+    key and an integer `n` picks the form itself; a count under another name ({queries},
+    {hosts}) needs tn(key, count, ...)."""
+    return key in _plural_bases()
+
+
+# Numbers in server texts the way the browser's Intl.NumberFormat writes them (round 10d):
+# decimal mark and digit grouping per language (CLDR, the languages netwarden ships).
+# lang -> (decimal mark, group separator, minimum digits before grouping starts)
+_NUM = {"de": (",", ".", 4), "es": (",", ".", 5), "pt-BR": (",", ".", 4), "fr": (",", " ", 4),
+        "ru": (",", " ", 5), "id": (",", ".", 4)}
+
+
+def num(value, lang: str = DEFAULT, decimals: int = 0) -> str:
+    """`value` with `decimals` places in `lang`: 1234.5 -> "1,234.5" (en), "1.234,5" (de),
+    "1 234,5" (fr); Hindi groups in lakhs ("1,23,456")."""
+    code = lang if lang in _catalog() else normalize(lang)
+    dec, grp, min_digits = _NUM.get(code, (".", ",", 4))
+    text = f"{abs(float(value)):.{max(0, int(decimals))}f}"
+    whole, _, frac = text.partition(".")
+    if len(whole) >= min_digits:
+        if code == "hi" and len(whole) > 3:   # 12,34,567
+            head, tail = whole[:-3], whole[-3:]
+            head = ",".join([head[max(0, i - 2):i] for i in range(len(head), 0, -2)][::-1])
+            whole = head + "," + tail
+        else:
+            whole = f"{int(whole):,}".replace(",", grp)
+    sign = "-" if float(value) < 0 and float(text) != 0 else ""
+    return sign + whole + (dec + frac if frac else "")
 
 
 def has(key: str) -> bool:
@@ -214,6 +297,79 @@ SAME_OK_KEYS = ("_meta", "svc.", "threat.", "tracker.", "brand.", "list_sep", "d
                 "devtype.", "cat.", "push.type.")
 _PH = None
 
+# --- plurals (round 10d) ---------------------------------------------------------------------
+# A count text in English: a placeholder, up to two words, then a plural noun ("{n} new
+# devices", "{queries} lookups"). Placeholders that never hold a count, and words ending in
+# -s that are no plural nouns, are left out. Such a key needs `key_one` (+ the forms of
+# PLURAL_FORMS) and tn() / TN() - or an entry in PLURAL_FIXED when its count is never 1.
+_COUNT_RX = r"\{(\w+)\}((?:\s+[A-Za-z][\w-]*){0,3})\s+([A-Za-z]+)\b"
+NOT_COUNTS = {"name", "brand", "what", "this", "last", "time", "device", "owner", "person", "domain",
+              "server", "value", "port", "ext", "when", "day", "label", "ms", "resolver", "service", "title",
+              "type", "kind", "who", "room", "grade", "window", "source", "path", "tz", "cutoff",
+              "first", "oldest", "newest", "start", "end", "until", "ago", "size", "cost", "model",
+              "pct", "rx", "tx", "down", "up"}
+_NOT_PLURAL = set("is was has this its us yes as his does goes uses starts looks needs sends opens "
+                  "gets lets says stays runs turns means plus less across status press process "
+                  "address access previous focus bonus pass alias gas miss ms vs mbps kbps".split())
+IRREGULAR_PLURALS = {"people", "children"}
+# count texts whose number is never 1 (a constant of the code, a minimum >= 2): key -> why
+PLURAL_FIXED = {
+    "status.db_range": "retention days >= 8 (store.MIN_RETENTION_DAYS)",
+    "app.sys.retention": "retention days >= 8",
+    "cli.prune.clamped": "the minimum kept is 8 days",
+    "cli.prune.done": "prune keeps at least 8 days",
+    "ui.ports_none_open": "exposure.PORTS: a fixed list of many ports",
+    "ui.check_note": "exposure.PORTS: a fixed list of many ports",
+    "app.d.ports_none": "exposure.PORTS: a fixed list of many ports",
+    "app.share.days": "the report period is 7 or 30 days",
+    "digest.window": "the digest compares {h} >= 24 hours with {d} >= 7 days",
+    "why.threshold.night": "alerts.NIGHT_BASE_DAYS (7)",
+    "why.threshold.spike": "alerts' spike baseline (7 days)",
+    "why.data.night_base": "the night baseline is always 7 nights",
+    "why.data.change": "the change baseline is always 7 days",
+    "bed.preview_none": "bedtime previews look back 14 days",
+    "bed.preview_some": "bedtime previews look back 14 days",
+    "share.period_line": "the report covers 7 or 30 days",
+    "share.privacy_h": "the report covers 7 or 30 days",
+    "share.sec.events": "the report covers 7 or 30 days",
+    "ui.lookup_used_by": "domain drawers count 7 days",
+    "cli.pair.scan": "pairing codes last 10 minutes",
+    "cli.pair.local_code": "pairing codes last 10 minutes",
+    "cli.pair.admin_code": "admin codes last 10 minutes",
+    "cli.claim.expires": "claim codes last 10 minutes",
+    "why.threshold.bedtime": "bedtime rules need >= 5 minutes",
+    "why.threshold.outage": "outage alerts need >= 2 minutes",
+    "app.ai.preview_tools": "ai.max_tool_rounds and the call cap are >= 2",
+    "app.ai.preview_tools_plain": "ai.max_tool_rounds and the call cap are >= 2",
+}
+# "device(s)", "Gerät(e)", "nouveau(x)", "устройств(о)" - never "http(s)://"
+_HEDGE_RX = r"[^\W\d_](?<!http)\((?:s|e|en|es|n|er|x|i|r|ы|и|ов|ей|ях|о)\)"
+
+
+def count_texts(en: dict) -> list:
+    """[(key, placeholder)]: English values that put a count before a plural noun."""
+    import re
+    out = []
+    for k, v in en.items():
+        if k == "_meta" or k.endswith(("_one", "_few", "_many")):
+            continue
+        for m in re.finditer(_COUNT_RX, v):
+            ph = m.group(1)
+            if ph in NOT_COUNTS:
+                continue
+            words = [w for w in m.group(2).split() + [m.group(3)] if not w.isupper()]   # not "DNS"
+            if any(w in IRREGULAR_PLURALS or (w.endswith("s") and not w.endswith("ss") and len(w) > 2
+                                               and w not in _NOT_PLURAL) for w in words):
+                out.append((k, ph))
+                break
+    return out
+
+
+def _one_is_only_1(code: str) -> bool:
+    """Does the "one" plural form of `code` cover the number 1 alone? (No in Russian, where
+    it is also 21, 31, ..., nor in French / Portuguese / Hindi, where it is also 0.)"""
+    return all(plural_category(n, code) != "one" for n in range(0, 1000) if n != 1)
+
 
 def _placeholders(text: str) -> set:
     import re
@@ -237,27 +393,54 @@ def _same_ok(key: str, value: str) -> bool:
 def check(catalog: dict | None = None, same_allow: dict | None = None) -> list:
     """Every locale problem: [(code, key, problem, detail)]. problem: missing | extra |
     empty | placeholders | same_as_en | simplified_in_hant | traditional_in_hans |
-    mainland_term. `same_allow` = {code: {key}} accepted copies of the English text
+    mainland_term | plural_missing (an English count text without `_one`) | plural_forms
+    (a `_few` / `_many` form the language needs) | plural_hedge ("device(s)").
+    `same_allow` = {code: {key}} accepted copies of the English text
     (netwarden/locale_same_ok.json by default)."""
+    import re
     cat = catalog if catalog is not None else _catalog()
     if same_allow is None:
         same_allow = _same_allow()
     en = {k: v for k, v in cat[FALLBACK].items() if k != "_meta"}
+    plural = {k[:-4] for k in en if k.endswith("_one") and k[:-4] in en}
     out = []
+    # plural_missing: an English count text without its singular (and no PLURAL_FIXED reason)
+    for k, _ph in count_texts(en):
+        if k not in plural and k not in PLURAL_FIXED:
+            out.append((FALLBACK, k, "plural_missing", en[k][:60]))
     for code, data in cat.items():
         vals = {k: v for k, v in data.items() if k != "_meta"}
+        forms = [f for f in PLURAL_FORMS.get(code, ()) if f != "one"]
+        # a language's own extra plural forms of a count text are expected, not "extra"
+        own = {b + "_" + f for b in plural for f in forms}
         for k in sorted(set(en) - set(vals)):
             out.append((code, k, "missing", ""))
-        for k in sorted(set(vals) - set(en)):
+        for k in sorted(set(vals) - set(en) - own):
             out.append((code, k, "extra", ""))
+        for k in sorted(own - set(vals)):
+            out.append((code, k, "plural_forms", ""))
         for k, v in sorted(vals.items()):
             if not isinstance(v, str) or not v.strip():
                 out.append((code, k, "empty", ""))
                 continue
-            if k in en and _placeholders(v) != _placeholders(en[k]):
+            base = k.rsplit("_", 1)[0]
+            if base in plural and k[len(base):] in ("_one", "_few", "_many"):
+                # a plural form may say "once" instead of "{n} time" - it may drop the count -
+                # only where that form means exactly 1 (not Russian 21, French 0, ...)
+                have, want = _placeholders(v), _placeholders(en[base])
+                droppable = {"n", "count"} if k.endswith("_one") and _one_is_only_1(code) else set()
+                if not have <= want or not (want - have) <= droppable:
+                    out.append((code, k, "placeholders", f"{sorted(have)} vs {sorted(want)}"))
+                ref = None
+            else:
+                ref = en.get(k)
+            if ref is not None and _placeholders(v) != _placeholders(ref):
                 out.append((code, k, "placeholders",
-                            f"{sorted(_placeholders(v))} != {sorted(_placeholders(en[k]))}"))
-            if code != FALLBACK and k in en and v == en[k] and not _same_ok(k, v) \
+                            f"{sorted(_placeholders(v))} != {sorted(_placeholders(ref))}"))
+            if re.search(_HEDGE_RX, v) and not k.startswith(SAME_OK_KEYS):
+                out.append((code, k, "plural_hedge", v[:60]))
+            copy = base in plural and v == vals.get(base)   # a form = the language's own base text
+            if code != FALLBACK and k in en and v == en[k] and not _same_ok(k, v) and not copy \
                     and k not in same_allow.get(code, ()) and k not in same_allow.get("*", ()):
                 out.append((code, k, "same_as_en", v[:60]))
             if code == "zh-Hant":

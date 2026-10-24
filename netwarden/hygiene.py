@@ -129,6 +129,7 @@ def checks(f: dict, lang: str, names: dict | None = None) -> list:
     """The localized checks for facts() `f`."""
     names = names or {}
     t = lambda key, **kw: i18n.t("hyg." + key, lang, **kw)  # noqa: E731
+    tn = lambda key, n, **kw: i18n.tn("hyg." + key, n, lang, **kw)  # noqa: E731
     nm = lambda x: names.get(x.get("mac"), x.get("name")) if x.get("mac") else x.get("name")  # noqa: E731
     out = []
 
@@ -149,15 +150,15 @@ def checks(f: dict, lang: str, names: dict | None = None) -> list:
         add("upnp_risky", "pass", t("upnp_risky.pass"))
         add("upnp_stale", "pass", t("upnp_stale.pass"))
     else:
-        add("upnp", "warn", t("upnp.warn", n=u["mappings"]))
+        add("upnp", "warn", tn("upnp.warn", u["mappings"]))
         r = f["upnp_risky"]
         add("upnp_risky", "fail" if r else "pass",
-            t("upnp_risky.fail", n=len(r), ports=_list(r, lang, lambda x: f"{x['proto']} {x['ext']} "
+            tn("upnp_risky.fail", len(r), ports=_list(r, lang, lambda x: f"{x['proto']} {x['ext']} "
                                                                         f"({x['service']}, {nm(x)})"))
             if r else t("upnp_risky.pass"), [x["id"] for x in r])
         s = f["upnp_stale"]
         add("upnp_stale", "warn" if s else "pass",
-            t("upnp_stale.warn", n=len(s), ports=_list(s, lang, lambda x: f"{x['proto']} {x['ext']} → "
+            tn("upnp_stale.warn", len(s), ports=_list(s, lang, lambda x: f"{x['proto']} {x['ext']} → "
                                                                         f"{x['ip']}"))
             if s else t("upnp_stale.pass"), ["upnp_stale"] if s else [])
     ro = f["router"]
@@ -170,7 +171,7 @@ def checks(f: dict, lang: str, names: dict | None = None) -> list:
     else:
         b = f["dns_bypass"]
         add("dns_bypass", "warn" if b else "pass",
-            t("dns_bypass.warn", n=len(b), names=_list(b, lang, nm)) if b else t("dns_bypass.pass"),
+            tn("dns_bypass.warn", len(b), names=_list(b, lang, nm)) if b else t("dns_bypass.pass"),
             [x["id"] for x in b])
     if not f["port_checked"]:
         add("exposure", "unknown", t("exposure.unknown"))
@@ -178,7 +179,7 @@ def checks(f: dict, lang: str, names: dict | None = None) -> list:
         e = f["exposure"]
         status = "fail" if any(x["risk"] == "high" for x in e) else ("warn" if e else "pass")
         add("exposure", status,
-            t("exposure.warn", n=len(e), ports=_list(e, lang, lambda x: f"{nm(x)} {x['port']} "
+            tn("exposure.warn", len(e), ports=_list(e, lang, lambda x: f"{nm(x)} {x['port']} "
                                                                      f"{x['service']}"))
             if e else t("exposure.pass"), [x["id"] for x in e])
     if not f["has_dns"]:
@@ -186,7 +187,7 @@ def checks(f: dict, lang: str, names: dict | None = None) -> list:
     else:
         i = f["iot"]
         add("iot", "warn" if i else "pass",
-            t("iot.warn", n=len(i), names=_list(i, lang, nm)) if i else t("iot.pass"),
+            tn("iot.warn", len(i), names=_list(i, lang, nm)) if i else t("iot.pass"),
             ["iot_net"] if i else [])
     return out
 

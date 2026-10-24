@@ -27,9 +27,9 @@ SECTIONS = {"threats": "threat", "exposure": "exposure", "upnp": "upnp", "outage
 KINDS = tuple(SECTIONS.values())
 
 
-def _bytes(n) -> str:
+def _bytes(n, lang: str) -> str:
     from netwarden.brain import human_bytes   # brain imports alerts imports this module
-    return human_bytes(n or 0)
+    return human_bytes(n or 0, lang)
 
 
 def _short(ts: str) -> str:
@@ -37,8 +37,8 @@ def _short(ts: str) -> str:
     return short(ts)
 
 
-def _gb(n: float) -> str:
-    return f"{n / 1e9:g}"
+def _gb(n: float, lang: str) -> str:
+    return i18n.num(n / 1e9, lang, 0 if n % 1e9 == 0 else 1)
 
 
 def _facts(kind: str, a: dict, lang: str, w: dict) -> list:
@@ -47,7 +47,8 @@ def _facts(kind: str, a: dict, lang: str, w: dict) -> list:
     if kind == "threat":
         from netwarden import threatintel   # (the label in `lang`, also for a canonical item)
         label = threatintel.localize(a, lang)["label"] if a.get("indicator") else a.get("label")
-        return [t("threat", domain=a["domain"], count=a["count"], h=h, label=label or "",
+        return [i18n.tn("why.data.threat", a["count"], lang, domain=a["domain"], count=a["count"], h=h,
+                         label=label or "",
                   sev=i18n.t("sev." + ("malicious" if a["severity"] == "malicious" else "high_risk"),
                              lang))]
     if kind == "exposure":
@@ -83,8 +84,9 @@ def _facts(kind: str, a: dict, lang: str, w: dict) -> list:
         return [t("bedtime", dur=screentime.duration(a["minutes"], lang), window=a["window"],
                   night=bedtime.night_label(a["night"], lang), rule=a.get("rule_name") or "—")]
     if kind == "spike":
-        return [t("spike", total=_bytes(a["total"]), h=int(a.get("hours") or h),
-                  rx=_bytes(a["rx_bytes"]), tx=_bytes(a["tx_bytes"]), typical=_bytes(a["typical"]),
+        return [t("spike", total=_bytes(a["total"], lang), h=int(a.get("hours") or h),
+                  rx=_bytes(a["rx_bytes"], lang), tx=_bytes(a["tx_bytes"], lang),
+                  typical=_bytes(a["typical"], lang),
                   ratio=round(a["ratio"]))]
     if kind == "change":
         from netwarden import services
@@ -115,7 +117,7 @@ def _threshold(kind: str, a: dict, lang: str, less: bool) -> str:
         return t("bedtime", min=2 * m if less else m)
     if kind == "spike":
         return t("spike", ratio=int(tuning.LESS_SPIKE_RATIO if less else alerts.SPIKE_RATIO),
-                 gb=_gb(tuning.LESS_SPIKE_BYTES if less else alerts.SPIKE_MIN_BYTES),
+                 gb=_gb(tuning.LESS_SPIKE_BYTES if less else alerts.SPIKE_MIN_BYTES, lang),
                  days=alerts.SPIKE_BASELINE_DAYS)
     if kind == "change":
         return t("change", n=tuning.LESS_CHANGE_SERVICES if less else 1)

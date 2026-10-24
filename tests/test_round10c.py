@@ -165,7 +165,7 @@ class Plurals(unittest.TestCase):
         self.assertIn("0 nouvel appareil", i18n.tn("intent.new_head", 0, "fr", when="x"))   # French: 0 is one
         self.assertIn("2 nouveaux appareils", i18n.tn("intent.new_head", 2, "fr", when="x"))
         self.assertIn("человек не включил", i18n.tn("intent.presence_hidden", 21, "ru"))
-        self.assertIn("чел. не включили", i18n.tn("intent.presence_hidden", 11, "ru"))
+        self.assertIn("11 человек не включили", i18n.tn("intent.presence_hidden", 11, "ru"))   # round 10d: _many
         self.assertEqual(i18n.tn("intent.alerts_head", 1, "zh-Hant", when="x"),
                          i18n.t("intent.alerts_head", "zh-Hant", n=1, when="x"))
         self.assertIn("**2 alerts**", i18n.tn("intent.alerts_head", "2", "en", when="x"))
@@ -238,8 +238,11 @@ class PageCode(unittest.TestCase):
         self.assertIn("function forgetTags() { lastTag = {}; }", APP)
         f = self.fn("setLang", 2200)
         self.assertIn("forgetTags();", f)
-        self.assertLess(f.index("forgetTags();"), f.index("refresh();"))
-        self.assertIn("if (S.since.r) sinceLoad();", f)
+        # round 10d: the refreshes moved to LANG_DEPS, run by langChanged() after the tags are gone
+        self.assertLess(f.index("forgetTags();"), f.index("langChanged();"))
+        deps = APP[APP.index("const LANG_DEPS"):APP.index("// end LANG_DEPS")]
+        self.assertIn("['datasets', () => true, () => refresh()]", deps)
+        self.assertIn("['since', () => !!S.since.r, () => sinceLoad()]", deps)
         # a refresh that was in flight when the language changed fetches again
         self.assertIn("if (lang !== S.lang) { S.refreshing = false; clearTimeout(slow); refresh(); return; }",
                       self.fn("refresh", 1200))
@@ -288,9 +291,10 @@ class ReviewFixes(DemoHome):
             self.assertEqual(out["intent"], "health")
             when = i18n.t("aitool.win.7d", lang)
             first = self.first(out["text"])
-            self.assertTrue(first.startswith("**") and first.endswith(f"({when})"), first)
+            # round 10d: the demo's outages in the window lead (test_round10d checks the wording)
+            self.assertTrue(first.startswith("**") and f"({when})" in first, first)
         out = ai_intents.answer(self.db, "en", "Was the internet down in the last 24 hours?")
-        self.assertTrue(self.first(out["text"]).endswith("(last 24 h)"), out["text"])
+        self.assertIn("(last 24 h)", out["text"])
 
     def test_night_lines_name_the_device_once(self):
         for lang in ("en", "zh-Hant"):
@@ -301,9 +305,11 @@ class ReviewFixes(DemoHome):
     def test_most_unusual_is_one_device(self):
         for lang in ("en", "ja", "zh-Hant"):
             out = ai_intents.answer(self.db, lang, i18n.t("app.ai.s1", lang))
-            first = self.first(out["text"])
+            # round 10d review: the alert total (the Overview's) leads, then that ONE device
+            total, second = [x for x in out["text"].splitlines()[1:] if x.strip()][:2]
+            self.assertTrue(total.startswith(i18n.t("intent.alerts_head", lang, n=99).split("99")[0]), total)
             head = i18n.t("intent.unusual_head", lang, name="\0").split("\0")
-            self.assertTrue(first.startswith(head[0]) and first.endswith(head[1]), first)
+            self.assertTrue(second.startswith(head[0]) and second.endswith(head[1]), second)
         # the device with the worst alert wins, then the one with more alerts
         rows = [{"mac": "aa:bb:cc:00:00:01", "severity": "medium"}, {"mac": None, "severity": "critical"},
                 {"mac": "aa:bb:cc:00:00:02", "severity": "high"}, {"mac": "aa:bb:cc:00:00:03", "severity": "high"},

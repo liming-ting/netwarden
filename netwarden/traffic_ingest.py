@@ -225,7 +225,7 @@ def print_report(db, hours: float, lang: str = i18n.DEFAULT) -> None:
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     summary = store.bandwidth_summary(db, since)
     print()
-    print(i18n.t("cli.traffic.report_title", lang, hours=f"{hours:g}", n=len(summary)))
+    print(i18n.tn("cli.traffic.report_title", len(summary), lang, hours=f"{hours:g}"))
     for key, s in sorted(summary.items(), key=lambda kv: -(kv[1]["rx_bytes"] + kv[1]["tx_bytes"])):
         print(f"  {key:<20} " + i18n.t("cli.traffic.row", lang,
                                        down=f"{brain.human_bytes(s['rx_bytes']):>9}",

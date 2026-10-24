@@ -470,9 +470,9 @@ def category_name(cat: str | None, lang: str) -> str:
 def reason(d: dict, lang: str) -> str:
     """The one-line, localized reason behind a grade."""
     if not d["tracker_queries"]:
-        return i18n.t("privacy.reason.none", lang, n=d["queries"])
+        return i18n.tn("privacy.reason.none", d["queries"], lang)
     if not d["unblocked"]:
-        return i18n.t("privacy.reason.all_blocked", lang, n=d["tracker_queries"])
+        return i18n.tn("privacy.reason.all_blocked", d["tracker_queries"], lang)
     kw = {"pct": _pct(d["unblocked"], d["queries"]),
           "category": category_name(d["main_category"], lang),
           "company": d["main_company"] or ""}
@@ -481,9 +481,10 @@ def reason(d: dict, lang: str) -> str:
 
 
 def home_line(home: dict, lang: str) -> str:
-    return i18n.t("privacy.home_line", lang, grade=home["grade"], trackers=home["tracker_queries"],
-                  queries=home["queries"], pct=_pct(home["tracker_queries"], home["queries"]),
-                  blocked=home["blocked"], bpct=_pct(home["blocked"], home["tracker_queries"]))
+    return i18n.tn("privacy.home_line", home["queries"], lang, grade=home["grade"],
+                   trackers=home["tracker_queries"], queries=home["queries"],
+                   pct=_pct(home["tracker_queries"], home["queries"]),
+                   blocked=home["blocked"], bpct=_pct(home["blocked"], home["tracker_queries"]))
 
 
 def localize(d: dict, lang: str) -> dict:

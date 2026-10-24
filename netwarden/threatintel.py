@@ -248,7 +248,7 @@ def main(argv=None) -> int:
         except FeedError as e:
             print(e.message(lang))
             return 2 if e.kind == "bad_url" else 1
-        print(i18n.t("threat.update_ok", lang, n=n))
+        print(i18n.tn("threat.update_ok", n, lang))
         return 0
 
     from netwarden import brain, store

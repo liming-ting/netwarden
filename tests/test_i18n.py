@@ -101,7 +101,10 @@ class LocaleFileTests(unittest.TestCase):
             with self.subTest(lang=code):
                 keys = set(_values(code))
                 self.assertEqual(ref - keys, set(), f"{code} is missing keys")
-                self.assertEqual(keys - ref, set(), f"{code} has keys English lacks")
+                # (+ the extra plural forms a language needs: Russian _few / _many)
+                forms = {k for k in keys - ref if k.rsplit("_", 1)[-1] in i18n.PLURAL_FORMS.get(code, ())
+                         and i18n.is_plural(k.rsplit("_", 1)[0])}
+                self.assertEqual(keys - ref - forms, set(), f"{code} has keys English lacks")
                 self.assertTrue(all(isinstance(v, str) and v.strip()
                                     for v in _values(code).values()))
         self.assertEqual(i18n.missing_keys(), {c: [] for c in EXPECTED})
@@ -111,6 +114,13 @@ class LocaleFileTests(unittest.TestCase):
         for code in EXPECTED:
             for key, text in _values(code).items():
                 with self.subTest(lang=code, key=key):
+                    base, _, form = key.rpartition("_")
+                    if form in ("one", "few", "many") and i18n.is_plural(base):
+                        # a plural form may say "once" instead of "{n} time"
+                        have, want = set(_PH.findall(text)), set(_PH.findall(en[base]))
+                        self.assertLessEqual(have, want)
+                        self.assertLessEqual(want - have, {"n", "count"})
+                        continue
                     self.assertEqual(set(_PH.findall(text)), set(_PH.findall(en[key])))
 
     def test_real_translations_not_english_copies(self):
