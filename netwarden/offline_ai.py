@@ -18,6 +18,8 @@ away automatically.
 """
 from __future__ import annotations
 
+import re
+
 from netwarden import alerts, i18n, naming, services, threatintel
 
 MAX_LINES = 5   # per section; the rest becomes "...and N more"
@@ -296,6 +298,29 @@ def section_focus(ctx) -> list:
     return lines
 
 
+def asks_about_focus(question: str | None, lang: str, focus: str | None) -> bool:
+    """Is `question` the device drawer's pre-filled "Ask AI about this device" question
+    (app.ask_prefill) for `focus`, with any name? The focus section answers exactly that,
+    so the "cannot answer free-form questions" note would contradict the answer."""
+    if not (question and focus):
+        return False
+    tpl = i18n.t("app.ask_prefill", lang).replace("{mac}", focus)
+    rx = r"\s*" + r".+?".join(re.escape(p) for p in tpl.split("{name}")) + r"\s*"
+    return re.fullmatch(rx, question, re.I | re.S) is not None
+
+
+# the chat's own standing suggestion chips (app.js, the static demo builder): the summary
+# below IS the offline answer to them, so they are not "free-form" either
+STANDING = ("app.ai.s1", "app.ai.s2", "app.ai.s3")
+
+
+def answered_here(question: str | None, lang: str, focus: str | None) -> bool:
+    """Is `question` one the summary answers (no "cannot answer free-form" note)?"""
+    q = (question or "").strip().casefold()
+    return (any(q == i18n.t(k, lang).strip().casefold() for k in STANDING)
+            or asks_about_focus(question, lang, focus))
+
+
 def summarize(db, snap: dict, lang: str, question: str | None = None,
               focus: str | None = None) -> str:
     """The offline answer: a rule-based summary of `snap` (brain.snapshot) in `lang`;
@@ -303,7 +328,7 @@ def summarize(db, snap: dict, lang: str, question: str | None = None,
     lang = i18n.normalize(lang)
     tr = lambda key, **kw: i18n.t("offline." + key, lang, **kw)  # noqa: E731
     lines = [tr("title")]
-    if question:
+    if question and not answered_here(question, lang, focus):
         lines.append(tr("question_note"))
     if not (snap["clients_with_dns"] and snap["total_queries"]):
         lines += ["", i18n.t("brain.no_data", lang), "  python3 -m netwarden ingest --discover",

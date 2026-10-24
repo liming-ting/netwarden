@@ -77,9 +77,28 @@ contain breaking changes).
   network and when, honest limitations. Screenshots refreshed from the current dashboard.
 - New `docs/images/social-preview.png` (1280x640), also used as the live demo's
   link-preview image.
+- Live demo polish: the made-up family's names, rooms and bedtime rule follow the page
+  language (Chinese in Traditional or Simplified script for zh-Hant / zh-Hans, an
+  English-speaking family - Dad, Mom, Kid - for every other language) everywhere they
+  appear, including alerts, saved answers, reports and exports; the English screenshots
+  and the social preview show the English-speaking family. "Ask AI about this device"
+  has a saved answer for every demo device; the assistant's header says it is a demo
+  with saved answers instead of naming a command-line flag; a first-visit welcome card
+  on Overview (dismissible, remembered in the browser) links to three findings and the
+  install guide.
+- The app's web manifest no longer sets `"id": "/"`: the id now defaults to the start
+  URL, which is right at the root of the app's own address, under the Home Assistant
+  ingress path and under the live demo's `/netwarden/` path.
 
 ### Fixed
 
+- A page or drawer for something that does not exist says "Not found" (in the live demo:
+  "not part of the demo", with a link back) instead of "Server error (HTTP 404)".
+- Offline mode no longer opens its answer to "Ask AI about this device" with "cannot
+  answer free-form questions"; in the live demo the answers say they were saved when the
+  site was built instead of "computed on this computer".
+- Home Assistant add-on: with the `offline_ai` option on, the assistant and System page
+  say offline mode was chosen in the add-on options, not with `--offline-ai`.
 - Pi-hole: `PIHOLE_URL` ending in `/admin` or `/api` works; a re-login after HTTP 401
   frees the old session first; queries hidden by the privacy level are no longer stored
   as the domain "hidden".

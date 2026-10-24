@@ -194,6 +194,8 @@ that PEER = HA admin; X-Ingress-Path/X-Forwarded-* read from it only. URLs are b
 relative manifest/css, sw.js scope): NEVER add a root-absolute URL to static/. Tests: tests/ingress_proxy.py.
 **Static demo (round 9 W)** - docs/dev/static_demo.md: `DEMO` in app.js ONLY with data-static-demo + static/demo.js (`NWDemo.file` = builder
 `static_name`, fixture-pinned); a NEW GET the page makes = add it to the builder (`PAGES`/`DEVICE_GETS`) or it 404s there; DEMO never POSTs.
+10b: names = `demo.HOUSEHOLDS` (zh-Hant|zh-Hans|en, `household_for`; DB keeps its first) -> ONE home per household; manifest NO id;
+`demo_hint()` swaps the offline title/enable hint in saved answers. Offline reason forced|addon|chosen|no_key (`brain.ai_config`).
 **Push (round 10 N)** - docs/notifications.md: tables push_channels (secrets column: NEVER in API/log/backup; log = shown_endpoint)
 / push_outbox (UNIQUE(channel,key) = dedupe + queue; new/resumed channel PRIMED) / push_log; admin-only `web.PUSH_GETS|POSTS`;
 levels minimal|standard|detailed (scrub() + hashed id below detailed); env `NETWARDEN_NOTIFY_<n>_*` read-only (absent = row STALE, never
@@ -219,24 +221,18 @@ python3 -m netwarden notify list | test NAME | send-digest [--daily]   # push ch
 NETWARDEN_HEADLESS=1 NETWARDEN_HOST=0.0.0.0|<lan-ip> python3 -m netwarden run   # container mode; --version
 bash scripts/adguard_dev.sh start; python3 scripts/dns_traffic.py   # DEV AdGuard (DNS :5354, API :3000); never for users
 python3 -m netwarden.web --db data/demo.db; python3 -m netwarden.alerts --db data/demo.db  # must work; perf_db.py / soak.py: perf
-python3 -m unittest discover -s tests          # 1322 tests, all must pass (+ node tests/js/*.js)
+python3 -m unittest discover -s tests          # 1351 tests, all must pass (+ node tests/js/*.js)
 ```
 Windows: `scripts\start_windows.cmd` (:8787) / `start_demo_windows.cmd` (:8788). Manual checks: own `--offline-ai` server on 127.0.0.1:8799, COPY of the demo DB.
 
 ## Status & next steps
 
-**Done:** MVP, i18n, demo; stages C P D1 D2 E1/E2 V L N F H M X V3 V4 Q A T U G K + review fixes 1-5; round 6 D/H/O/P/E (Docker +
-headless admin claim, HA add-on, open-source tidy, launch/, newcomer: `THINKING_HEADROOM`, chat note `empty`). Round 7 L (test_round7_l.py):
-THIRD_PARTY_NOTICES cites sources; sprite icons OWN drawings; third-party code only in netwarden/vendor/; downloaded data (manuf, threat
-feed) never in tree/wheel/image. Round 7 C (docs/dev/ai_cost.md): prompt caching (no breakpoint on the snapshot; tool defs never edited per
-request), `ai.monthly_budget|budget_warn|price_*`, SSE `usage|budget`; `usage.Guard` before EVERY tool round, JSON AI endpoints 409
-(`brain.BudgetNeeded`); prices: re-check + bump PRICES_CHECKED. Round 8 R (test_round8_r.py): liming-ting/netwarden,
-ghcr.io/liming-ting/netwarden + netwarden-addon (lower case); AGPL-3.0-or-later (LICENSE verbatim + hash-pinned: NEVER edit, no per-file headers);
-`netwarden.LICENSE|SOURCE_URL|COPYRIGHT` = ONE source; .gitattributes (LF; .cmd/.bat CRLF); images ONLY from v* tags after `smoke` +
-`tests`. Owner LAN values: read from CLAUDE.local.md at test time (test_round6_o). **CI1** (test_ci1.py): TZ=UTC + Asia/Taipei, job `tz`
-(`scripts/dev/tz_sweep.sh`); demo: one RNG per LOCAL day. Round 9 V (integrations), U (keyboard), X (report), W (static demo) + review
-fixes (palette = real modal: `.app`/drawer/chat inert while open; report "keep names" still masked): test_round9_*.py. Round 10 N push;
-P: both READMEs rewritten (say the same), launch/posts (HN + HA forum = notes only). Live demo LIVE but pages.yml is run BY HAND after UI changes.
+**Done:** MVP, i18n, demo; stages C P D1 D2 E1/E2 V L N F H M X V3 V4 Q A T U G K + review fixes; rounds 6 D/H/O/P/E, 7 L/C, 8 R,
+CI1, 9 V/U/X/W, 10 N/P, 10b (tests `test_round*.py`). Standing rules from them: third-party code only in netwarden/vendor/, downloaded
+data (manuf, threat feed) never in tree/wheel/image; AI cost (docs/dev/ai_cost.md): no cache breakpoint on the snapshot, `usage.Guard`
+before EVERY tool round, re-check prices + bump PRICES_CHECKED; ghcr.io/liming-ting/netwarden + netwarden-addon (lower case);
+AGPL-3.0-or-later, LICENSE hash-pinned (NEVER edit, no per-file headers), `netwarden.LICENSE|SOURCE_URL|COPYRIGHT` = ONE source; images
+ONLY from v* tags; CI TZ=UTC + Asia/Taipei + `scripts/dev/tz_sweep.sh`; READMEs say the same; pages.yml (live demo) is run BY HAND.
 **Next:** next release (launch/release_checklist.md step 17). Later: block_reason breakdown; HTTPS.
 
 ## Conventions

@@ -1290,6 +1290,15 @@ tr.flash > td, .rows > li.flash { animation: flashbg 1.6s ease-out; }
   .banner.demobar > .ic { display: none; }
   .banner.demobar .btn { margin-left: auto; margin-top: -2px; }
 }
+/* round 10b: the static demo's first-visit card on Overview + the way back from a drawer
+   for something the demo home does not have */
+.demo-welcome { border-left: 4px solid var(--acc); margin-bottom: var(--s3); }
+.demo-welcome p { margin: 0 0 var(--s2); }
+.demo-welcome .hint { margin-bottom: var(--s1); }
+.demo-finds { margin: 0 0 var(--s3); padding-left: var(--s5); display: grid; gap: var(--s1); }
+.demo-finds li { line-height: 1.5; min-height: 24px; }
+.demo-finds a { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.demo-back { text-align: center; margin: var(--s3) 0 0; }
 .boot-spin { width: 28px; height: 28px; margin: 18vh auto 0; border-radius: 50%; border: 3px solid var(--line);
   border-top-color: var(--acc); animation: spin 1s linear infinite; }
 .boot-fail { margin: 12vh auto 0; }

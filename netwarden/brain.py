@@ -87,11 +87,12 @@ ENV_KEYS = tuple(dict.fromkeys((
     "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "NETWARDEN_LANG",
     "NETWARDEN_OFFLINE_AI", "NETWARDEN_RETENTION_DAYS", "NETWARDEN_TZ",
     "NETWARDEN_REQUIRE_AUTH", "NETWARDEN_HOST", "NETWARDEN_PORT", "NETWARDEN_HEADLESS",
-    "ADGUARD_URL", "ADGUARD_USER", "ADGUARD_PASS", "ADGUARD_VERIFY_TLS",
+    "NETWARDEN_ADDON", "ADGUARD_URL", "ADGUARD_USER", "ADGUARD_PASS", "ADGUARD_VERIFY_TLS",
     "PIHOLE_URL", "PIHOLE_PASSWORD", "PIHOLE_VERIFY_TLS", "NETWARDEN_DNS_SOURCE",
     "NTOPNG_URL", "NTOPNG_USER", "NTOPNG_PASS", "NTOPNG_TOKEN", "NTOPNG_IFID",
     "NTOPNG_VERIFY_TLS") + settings.env_keys()))
 OFFLINE_ENV = "NETWARDEN_OFFLINE_AI"   # "1" = never call the LLM (--offline-ai)
+ADDON_ENV = "NETWARDEN_ADDON"          # "1" = set by the Home Assistant add-on (addon.env_from_options)
 
 
 def human_bytes(n: float) -> str:
@@ -451,7 +452,9 @@ def ai_config(env: dict, db=None) -> dict:
            "model": "offline", "base_url": None, "destination": "none", "redact": False,
            "redact_setting": vals["ai.redact"]}
     if forced or choice == "offline":   # the user's explicit choice: no nagging hint
-        cfg["reason"] = "forced" if forced else "chosen"
+        # Home Assistant add-on: the `offline_ai` option sets the variable (addon.BOOL_OPTIONS),
+        # the user never typed --offline-ai
+        cfg["reason"] = ("addon" if env.get(ADDON_ENV) == "1" else "forced") if forced else "chosen"
     elif choice == "anthropic" or (choice == "auto" and key):
         if key:
             cfg.update(mode="anthropic", provider="Anthropic", destination="cloud",
@@ -476,8 +479,9 @@ def ai_mode(env: dict, db=None) -> str:
 
 
 def offline_reason(env: dict, db=None) -> str | None:
-    """Why the AI is offline: "forced" (--offline-ai / NETWARDEN_OFFLINE_AI), "chosen"
-    (ai.provider = offline), "no_key" (nothing configured), or None when an AI is on."""
+    """Why the AI is offline: "forced" (--offline-ai / NETWARDEN_OFFLINE_AI), "addon" (the
+    same, set by the Home Assistant add-on's offline_ai option), "chosen" (ai.provider =
+    offline), "no_key" (nothing configured), or None when an AI is on."""
     return ai_config(env, db)["reason"]
 
 

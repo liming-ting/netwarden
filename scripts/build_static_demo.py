@@ -44,13 +44,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
-from urllib.parse import parse_qsl, quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import netwarden  # noqa: E402
-from netwarden import activity, brain, cache, demo, dns_ingest, i18n, pairing, web  # noqa: E402
+from netwarden import activity, brain, cache, demo, dns_ingest, i18n, offline_ai, pairing, web  # noqa: E402
 
 DATA_DIR = "demo-data/"
 DEFAULT_SITE = "https://liming-ting.github.io/netwarden/"
@@ -72,7 +72,7 @@ DEVICE_GETS = ("/api/device?mac={m}", "/api/activity?mac={m}", "/api/timeline?ma
 REPORT_PERIODS, REPORT_FORMATS = ("7", "30"), ("html", "md")
 MAX_LOOKUPS = 400              # service + domain drawers (the demo home has far fewer)
 MAX_ANSWERS = 14               # pre-computed assistant answers per language
-SUGGESTED = ("app.ai.s1", "app.ai.s2", "app.ai.s3")   # the chat's own standing questions
+SUGGESTED = offline_ai.STANDING   # the chat's own standing questions
 
 # --- the request -> file map (static/demo.js has the same function) ----------------------
 LANG_FREE = ("/api/meta",)
@@ -113,6 +113,13 @@ def static_name(request: str, fallback_lang: str | None = None) -> str:
 def chat_name(mode: str, question: str, lang: str) -> str:
     """NWDemo.chatFile: one pre-computed answer (the raw SSE stream)."""
     return f"{DATA_DIR}{_lang_of(lang)}/chat/{fnv(mode + chr(10) + str(question or '').strip())}.txt"
+
+
+def device_chat_name(mac: str, lang: str) -> str:
+    """The answer to a device drawer's pre-filled "Ask AI about this device" question
+    (NWDemo.chatFile('device', mac, lang)): keyed by the device, not by the question's
+    text, so the page needs no copy of the name it put in the question."""
+    return chat_name("device", mac, lang)
 
 
 def chat_index(lang: str) -> str:
@@ -259,19 +266,30 @@ def build(out: Path, now: datetime | None = None, langs=None, quick: bool = Fals
         site_url += "/"
     now = now or datetime.now(timezone.utc).replace(second=0, microsecond=0)
     site = Site()
+    # the made-up family's names follow the language (demo.HOUSEHOLDS): one home per
+    # household, each crawled in its own languages - the same `now`, so the same story
+    groups: dict[str, list[str]] = {}
+    for code in langs:
+        groups.setdefault(demo.household_for(code), []).append(code)
+    stats: dict = {}
     with tempfile.TemporaryDirectory(prefix="nw_static_demo_") as tmp, pinned_tz(DEMO_TZ):
-        db_path = Path(tmp) / "demo.db"
-        demo.build(db_path, now=now)
-        srv = web.make_server(db_path, 0, {brain.OFFLINE_ENV: "1", "NETWARDEN_TZ": DEMO_TZ},
-                              i18n.DEFAULT)
-        threading.Thread(target=srv.serve_forever, name="static-demo", daemon=True).start()
-        try:
-            stats = _crawl(site, _client(srv.server_address[1]), langs, quick, now, log)
-        finally:
-            srv.shutdown()
-            web.close_server(srv)
+        paths = []
+        for household, group in groups.items():
+            db_path = Path(tmp) / f"demo-{household}.db"
+            paths.append(str(db_path))
+            demo.build(db_path, now=now, household=household)
+            srv = web.make_server(db_path, 0, {brain.OFFLINE_ENV: "1", "NETWARDEN_TZ": DEMO_TZ},
+                                  i18n.DEFAULT)
+            threading.Thread(target=srv.serve_forever, name="static-demo", daemon=True).start()
+            try:
+                part = _crawl(site, _client(srv.server_address[1]), group, quick, now, log)
+            finally:
+                srv.shutdown()
+                web.close_server(srv)
+            for k, v in part.items():
+                stats[k] = stats.get(k, 0) + v if k in ("requests", "answers") else (stats.get(k) or v)
         _page(site, site_url)
-        privacy_scan(site, [tmp, str(db_path)])
+        privacy_scan(site, [tmp, *paths])
     _write(site, Path(out))
     stats.update(files=len(site.files), bytes=site.size(), seconds=round(time.monotonic() - started, 1),
                  langs=langs, built_at=now.isoformat())
@@ -349,7 +367,8 @@ def _crawl(site: Site, request, langs, quick: bool, now: datetime, log) -> dict:
     get_all(reports, first)
     for lang in langs:
         _neutral_pairing(site, lang)
-    answers = {lang: _answers(site, request, lang, count, quick) for lang in langs}
+    saved = [m for m in macs if DEVICE_GETS[0].format(m=quote(m, safe="")) in device_gets]
+    answers = {lang: _answers(site, request, lang, count, quick, saved) for lang in langs}
     log(f"crawled {len(macs)} devices, {len(lookups)} service/domain drawers"
         f"{' (capped)' if capped else ''}, {len(people)} people, {sum(answers.values())} answers")
     return {"requests": count["requests"], "devices": len(macs), "lookups": len(lookups),
@@ -371,24 +390,41 @@ def _neutral_pairing(site: Site, lang: str) -> None:
 def demo_hint(sse: bytes, lang: str) -> bytes:
     """An offline answer ends with how to turn the real AI on (.env, restart without
     --offline-ai): meaningless to someone trying the demo in a browser. That line (one
-    chunk: offline_ai.chunks streams line by line) becomes the demo's own note."""
-    hint = i18n.t("offline.enable_hint", lang).strip()
-    note = "💡 " + i18n.t("app.demo.chat_only", lang)
+    chunk: offline_ai.chunks streams line by line) becomes the demo's own note. Likewise
+    the opening line ("computed on this computer"): the visitor's computer computed
+    nothing, the answer was saved when the site was built."""
+    swap = {i18n.t("offline.enable_hint", lang).strip(): "💡 " + i18n.t("app.demo.chat_only", lang),
+            i18n.t("offline.title", lang).strip(): i18n.t("app.demo.answer_title", lang),
+            i18n.t("intent.title", lang).strip(): i18n.t("app.demo.answer_title", lang)}
     frames = sse.decode("utf-8").split("\n\n")
     for i, frame in enumerate(frames):
         if not frame.startswith("data: "):
             continue
         data = json.loads(frame[len("data: "):])
-        if isinstance(data, dict) and isinstance(data.get("t"), str) and data["t"].strip() == hint:
-            data["t"] = data["t"].replace(hint, note)
+        if isinstance(data, dict) and isinstance(data.get("t"), str) and data["t"].strip() in swap:
+            line = data["t"].strip()
+            data["t"] = data["t"].replace(line, swap[line])
             frames[i] = "data: " + json.dumps(data, ensure_ascii=False)
     return "\n\n".join(frames).encode("utf-8")
 
 
-def _answers(site: Site, request, lang: str, count: dict, quick: bool) -> int:
+def device_name(dev: dict, lang: str) -> str:
+    """The name a device drawer puts in its "Ask AI about this device" question (app.js
+    dname(); only the answer's wording depends on it - the page finds the answer by MAC)."""
+    ti, ident = dev.get("type_info") or {}, dev.get("ident") or {}
+    name = dev.get("name") or ident.get("name") or dev.get("vendor")
+    if name:
+        return name
+    if dev.get("type") not in (None, "", "unknown") and ti.get("type_name") and dev.get("owner"):
+        return f"{ti['type_name']} · {dev['owner']}"
+    return i18n.t("app.d.private_device" if dev.get("randomized") else "ui.unknown_device", lang)
+
+
+def _answers(site: Site, request, lang: str, count: dict, quick: bool, macs=()) -> int:
     """The offline assistant's answers to the suggested questions (and to the follow-up
     questions those answers suggest, up to MAX_ANSWERS), plus "Insight", as the raw SSE
-    streams the page reads; index.json lists what has an answer."""
+    streams the page reads; index.json lists what has an answer. Round 10b: plus every
+    saved device's answer to its drawer's pre-filled question (index "devices")."""
     qs = json.loads(site.files[static_name(with_lang("/api/ai/questions", lang))])
     suggested = [q["text"] for q in qs.get("questions", []) if isinstance(q.get("text"), str)]
     suggested += [i18n.t(k, lang) for k in SUGGESTED]
@@ -414,10 +450,34 @@ def _answers(site: Site, request, lang: str, count: dict, quick: bool) -> int:
                 todo += [("chat", t.strip()) for t in data.get("questions", [])
                          if isinstance(t, str) and t.strip()]
     texts = [q for m, q in answered if m == "chat"]
+    devices = []
+    for mac in macs:
+        dev = json.loads(site.files[static_name(with_lang(DEVICE_GETS[0].format(m=quote(mac, safe="")), lang))])
+        q = i18n.t("app.ask_prefill", lang, name=device_name(dev, lang), mac=mac)
+        status, _ctype, sse = request("POST", "/api/chat/stream", {
+            "mode": "chat", "messages": [{"role": "user", "content": q}], "mac": mac, "lang": lang})
+        count["requests"] += 1
+        if status != 200 or b"event: done" not in sse:
+            raise BuildError(f"device answer ({lang}, {mac}) -> {status}: {sse[:200]!r}")
+        site.put(device_chat_name(mac, lang), demo_hint(sse, lang))
+        devices.append(mac)
     site.put(chat_index(lang), json.dumps(
         {"suggested": [q for q in suggested if q in texts], "answers": texts,
-         "insight": ("insight", "") in answered}, ensure_ascii=False).encode("utf-8"))
-    return len(answered)
+         "insight": ("insight", "") in answered, "devices": devices}, ensure_ascii=False).encode("utf-8"))
+    return len(answered) + len(devices)
+
+
+def demo_manifest(body: bytes, site_url: str) -> bytes:
+    """static/manifest.webmanifest for the site: start_url / scope stay relative to the
+    manifest ("../" = the site's own folder, e.g. /netwarden/); the app id - resolved
+    against the ORIGIN, not the manifest - becomes the site's path, so the demo is its
+    own installable app instead of claiming the whole github.io origin."""
+    man = json.loads(body)
+    if man.get("start_url") != "../" or man.get("scope") != "../":
+        raise BuildError("manifest.webmanifest changed shape: update demo_manifest()")
+    path = urlsplit(site_url).path or "/"
+    man = {"id": path if path.endswith("/") else path + "/", **man}
+    return (json.dumps(man, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
 def _page(site: Site, site_url: str) -> None:
@@ -453,7 +513,7 @@ def _page(site: Site, site_url: str) -> None:
         found = web.static_file(name)
         if not found:
             raise BuildError(f"static/{name} is missing")
-        site.put("static/" + name, found[0])
+        site.put("static/" + name, found[0] if name != "manifest.webmanifest" else demo_manifest(found[0], site_url))
     site.put("og-image.png", OG_IMAGE.read_bytes())
     site.put(".nojekyll", b"")   # GitHub Pages: serve the files as they are (no Jekyll)
 

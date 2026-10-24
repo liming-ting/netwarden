@@ -132,7 +132,9 @@ def env_from_options(opts: dict, environ=None) -> dict:
             out[var] = "1" if opts[key] else "0"
     if "NETWARDEN_TZ" not in out and _zone_name(environ.get("TZ")):
         out["NETWARDEN_TZ"] = environ["TZ"].strip()
-    out.update(NETWARDEN_HEADLESS="1", NETWARDEN_REQUIRE_AUTH="1",
+    # NETWARDEN_ADDON: what the user chose came from these options (brain.ai_config says
+    # "chosen in the add-on options", not "--offline-ai")
+    out.update(NETWARDEN_HEADLESS="1", NETWARDEN_REQUIRE_AUTH="1", NETWARDEN_ADDON="1",
                NETWARDEN_HOST="127.0.0.1", NETWARDEN_PORT=str(INGRESS_PORT))
     return out
 

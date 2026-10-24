@@ -333,7 +333,7 @@ def ago(ts: str | None, lang: str, now: datetime | None = None) -> str:
 def ai_line(ai: dict, lang: str) -> str:
     """'AI: Anthropic (claude-...)' or, offline, just 'AI: offline (...)'."""
     why = ai.get("reason") if ai["mode"] == "offline" else None
-    mode = i18n.t(f"status.ai.offline_{why}" if why in ("forced", "chosen")
+    mode = i18n.t(f"status.ai.offline_{why}" if why in ("forced", "addon", "chosen")
                   else "status.ai." + ai["mode"], lang)
     if ai["mode"] == "offline":
         return i18n.t("status.ai_only", lang, mode=mode)

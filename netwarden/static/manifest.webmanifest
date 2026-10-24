@@ -1,7 +1,6 @@
 {
   "name": "netwarden",
   "short_name": "netwarden",
-  "id": "/",
   "start_url": "../",
   "scope": "../",
   "display": "standalone",

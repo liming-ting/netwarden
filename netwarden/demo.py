@@ -36,7 +36,8 @@ cloud + ~9 GB/day upload + Telnet open". Live port checks are refused on this DB
 Stage D2 (types / people & rooms / activity): "day" and "night" are LOCAL hours (the
 same time zone the dashboard uses), so the heatmaps look like a real family's week.
 Owners and rooms are seeded the way a Taiwanese household types them (爸爸, 媽媽, 小孩;
-客廳, 書房, 小孩房 - user text, never translated). The kid's Android tablet
+客廳, 書房, 小孩房 - user text, never translated; HOUSEHOLDS also has a Simplified-Chinese
+and an English-speaking family for the static live demo). The kid's Android tablet
 (Galaxy-Tab-A7, type from its hostname; the phones' type comes from their private MAC +
 mobile apps) is a daytime device, but was busy around 01:00-02:00 on the last two
 nights -> an "unusual hours" alert.
@@ -94,6 +95,33 @@ from netwarden import activity, i18n, store
 SEED = 1729
 RNG = random.Random(SEED)  # fixed -> reproducible demo (re-seeded in build())
 DEMO_DB = store.DEFAULT_DB.parent / "demo.db"
+
+# The family's own words: names, rooms, the bedtime rule's name and what two devices
+# announce. They are USER text (the app never translates them), so the built-in demo
+# (data/demo.db) is the Taiwanese household; the static live demo seeds one home per
+# script, so a reader of the English - or German, Hindi, ... - UI never meets names that
+# look untranslated: zh-Hant and zh-Hans keep Chinese names in their own script, every
+# other language gets the English-speaking household (household_for()). One table, so
+# the two demos cannot drift.
+DEFAULT_HOUSEHOLD = "zh-Hant"
+HOUSEHOLDS = {
+    "zh-Hant": {"dad": "爸爸", "mom": "媽媽", "kid": "小孩", "living": "客廳", "study": "書房",
+                "kids_room": "小孩房", "kitchen": "廚房", "door": "門口", "rule": "上學日晚上",
+                "dad_phone": "爸爸的 iPhone", "cast": "客廳 Chromecast"},
+    "zh-Hans": {"dad": "爸爸", "mom": "妈妈", "kid": "小孩", "living": "客厅", "study": "书房",
+                "kids_room": "小孩房", "kitchen": "厨房", "door": "门口", "rule": "上学日晚上",
+                "dad_phone": "爸爸的 iPhone", "cast": "客厅 Chromecast"},
+    "en": {"dad": "Dad", "mom": "Mom", "kid": "Kid", "living": "Living room", "study": "Study",
+           "kids_room": "Kid's room", "kitchen": "Kitchen", "door": "Front door",
+           "rule": "School nights", "dad_phone": "Dad's iPhone", "cast": "Living Room Chromecast"},
+}
+
+
+def household_for(lang: str | None) -> str:
+    """UI language -> the household whose names read naturally in it."""
+    lang = i18n.normalize(lang) if lang else DEFAULT_HOUSEHOLD
+    return lang if lang in ("zh-Hant", "zh-Hans") else "en"
+
 
 BASELINE_DAYS = 8   # how far back a known device's history reaches (first_seen)
 N_BASELINE = 4      # baseline events emitted per normal domain (presence, not volume)
@@ -469,24 +497,28 @@ def _seed_health(db, now: datetime, events: int, samples: int) -> None:
 # the UPnP Internet gateway; the Chromecast - invisible to the DNS filter - still says
 # who it is over mDNS; Dad's private-address phone announces "爸爸的 iPhone" (a name
 # netwarden suggests, but never applies on its own).
-IDENTITY = [
-    ("8c:79:f5:0b:cd:12", "mdns", "Samsung Q80 Series (55)", "Samsung", "QA55Q80BAWXZW", "tv",
-     "_airplay._tcp", 8),
-    ("8c:79:f5:0b:cd:12", "ssdp", "[TV] Samsung Q80 Series (55)", "Samsung Electronics",
-     "QA55Q80BAWXZW", "tv", "urn:schemas-upnp-org:device:MediaRenderer:1", 8),
-    ("3c:2a:f4:88:19:d0", "mdns", "HP OfficeJet Pro 9010 series", "HP",
-     "HP OfficeJet Pro 9010 series", "printer", "_ipp._tcp _ipps._tcp _printer._tcp", 8),
-    ("50:c7:bf:3e:21:54", "ssdp", "TP-Link Archer C6", "TP-Link", "Archer C6", "network",
-     "urn:schemas-upnp-org:device:InternetGatewayDevice:1", 8),
-    ("f4:f5:d8:6c:21:0e", "mdns", "客廳 Chromecast", "Google", "Chromecast", "streaming",
-     "_googlecast._tcp", 8),
-    ("a6:71:0c:9d:4e:f2", "mdns", "爸爸的 iPhone", "Apple", "iPhone15,2", "phone",
-     "_companion-link._tcp", 6),
-    ("9e:88:44:21:af:30", "dns", "Galaxy-Tab-A7", "", "", None, "", 8),
-    # Stage P: the same iPhone on its new private address announces the same name
-    ("ea:12:7b:c0:5e:39", "mdns", "爸爸的 iPhone", "Apple", "iPhone15,2", "phone",
-     "_companion-link._tcp", 2),
-]
+def identity(h: dict | None = None) -> list:
+    """IDENTITY for household `h` (the Chromecast and Dad's iPhone announce names the
+    family gave them)."""
+    h = h or HOUSEHOLDS[DEFAULT_HOUSEHOLD]
+    return [
+        ("8c:79:f5:0b:cd:12", "mdns", "Samsung Q80 Series (55)", "Samsung", "QA55Q80BAWXZW", "tv",
+         "_airplay._tcp", 8),
+        ("8c:79:f5:0b:cd:12", "ssdp", "[TV] Samsung Q80 Series (55)", "Samsung Electronics",
+         "QA55Q80BAWXZW", "tv", "urn:schemas-upnp-org:device:MediaRenderer:1", 8),
+        ("3c:2a:f4:88:19:d0", "mdns", "HP OfficeJet Pro 9010 series", "HP",
+         "HP OfficeJet Pro 9010 series", "printer", "_ipp._tcp _ipps._tcp _printer._tcp", 8),
+        ("50:c7:bf:3e:21:54", "ssdp", "TP-Link Archer C6", "TP-Link", "Archer C6", "network",
+         "urn:schemas-upnp-org:device:InternetGatewayDevice:1", 8),
+        ("f4:f5:d8:6c:21:0e", "mdns", h["cast"], "Google", "Chromecast", "streaming",
+         "_googlecast._tcp", 8),
+        ("a6:71:0c:9d:4e:f2", "mdns", h["dad_phone"], "Apple", "iPhone15,2", "phone",
+         "_companion-link._tcp", 6),
+        ("9e:88:44:21:af:30", "dns", "Galaxy-Tab-A7", "", "", None, "", 8),
+        # Stage P: the same iPhone on its new private address announces the same name
+        ("ea:12:7b:c0:5e:39", "mdns", h["dad_phone"], "Apple", "iPhone15,2", "phone",
+         "_companion-link._tcp", 2),
+    ]
 
 # UPnP checks of the router (upnp.py): hours ago of each check, and each mapping's
 # (mac, protocol, external port, internal port, description, first seen hours ago).
@@ -503,8 +535,8 @@ UPNP_MAPPINGS = [
 UPNP_STALE = [("192.168.1.77", "UDP", 51413, 51413, "Transmission", 120)]
 
 
-def build_identity(db, now: datetime) -> int:
-    for mac, src, name, maker, model, kind, detail, days in IDENTITY:
+def build_identity(db, now: datetime, h: dict | None = None) -> int:
+    for mac, src, name, maker, model, kind, detail, days in identity(h):
         first = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         last = (now - timedelta(minutes=SEEN_JUST_NOW_MIN)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         store.upsert_identity(db, mac, src, name, maker, model, kind, detail, seen=first)
@@ -536,28 +568,34 @@ def build_upnp(db, now: datetime) -> int:
     return len(UPNP_CHECKS_HOURS)
 
 
-# Stage D2: who owns what and where it stands, typed the way a Taiwanese family would
-# (this is the USER's own free text - never translated). mac -> (owner, room).
-PROFILES = {
-    "50:c7:bf:3e:21:54": (None, "客廳"),        # router
-    "d8:3a:dd:1a:2b:3c": ("爸爸", "書房"),      # this machine
-    "a6:71:0c:9d:4e:f2": ("爸爸", None),        # phone
-    "b2:55:3a:7c:10:9b": ("媽媽", None),        # phone (uses DoH)
-    "9e:88:44:21:af:30": ("小孩", "小孩房"),    # the kid's tablet (night owl)
-    "8c:79:f5:0b:cd:12": (None, "客廳"),        # Samsung TV
-    "fc:65:de:33:77:aa": (None, "廚房"),        # Echo
-    "a0:43:b0:9f:21:5e": (None, "門口"),        # ipcam
-    "3c:2a:f4:88:19:d0": (None, "書房"),        # printer
-    "70:9e:29:55:3b:81": ("小孩", "客廳"),      # PS5
-    "f4:f5:d8:6c:21:0e": (None, "客廳"),        # Chromecast
-    "5c:e9:1e:7a:44:b8": (None, "客廳"),        # Roborock
-    "e6:3b:91:5d:22:c4": ("小孩", None),        # Stage P: the kid's phone
-    "c8:89:f3:10:4a:7e": ("媽媽", "書房"),      # Stage P: Mom's laptop
+# Stage D2: who owns what and where it stands, typed the way the family would (this is
+# the USER's own free text - never translated): mac -> (owner, room) as HOUSEHOLDS keys.
+PROFILE_KEYS = {
+    "50:c7:bf:3e:21:54": (None, "living"),      # router
+    "d8:3a:dd:1a:2b:3c": ("dad", "study"),      # this machine
+    "a6:71:0c:9d:4e:f2": ("dad", None),         # phone
+    "b2:55:3a:7c:10:9b": ("mom", None),         # phone (uses DoH)
+    "9e:88:44:21:af:30": ("kid", "kids_room"),  # the kid's tablet (night owl)
+    "8c:79:f5:0b:cd:12": (None, "living"),      # Samsung TV
+    "fc:65:de:33:77:aa": (None, "kitchen"),     # Echo
+    "a0:43:b0:9f:21:5e": (None, "door"),        # ipcam
+    "3c:2a:f4:88:19:d0": (None, "study"),       # printer
+    "70:9e:29:55:3b:81": ("kid", "living"),     # PS5
+    "f4:f5:d8:6c:21:0e": (None, "living"),      # Chromecast
+    "5c:e9:1e:7a:44:b8": (None, "living"),      # Roborock
+    "e6:3b:91:5d:22:c4": ("kid", None),         # Stage P: the kid's phone
+    "c8:89:f3:10:4a:7e": ("mom", "study"),      # Stage P: Mom's laptop
 }
 PROFILES_NOTED_DAYS_AGO = 5
 
 
-def _seed_profiles(db, now: datetime) -> None:
+def profiles(h: dict | None = None) -> dict:
+    """mac -> (owner, room) in household `h`'s own words."""
+    h = h or HOUSEHOLDS[DEFAULT_HOUSEHOLD]
+    return {mac: (h[o] if o else None, h[r] if r else None) for mac, (o, r) in PROFILE_KEYS.items()}
+
+
+def _seed_profiles(db, now: datetime, h: dict | None = None) -> None:
     """Owners/rooms as if the user had typed them a few days ago. Once per demo DB
     (meta demo_profiles=1) and only into EMPTY fields, so a user's own edits - and
     owners/rooms they cleared on purpose - survive every re-seed."""
@@ -565,7 +603,7 @@ def _seed_profiles(db, now: datetime) -> None:
         return
     ts = (now - timedelta(days=PROFILES_NOTED_DAYS_AGO)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     with db:
-        for mac, (owner, room) in PROFILES.items():
+        for mac, (owner, room) in profiles(h).items():
             db.execute("INSERT OR IGNORE INTO device_profiles (mac, updated_at) VALUES (?, ?)",
                        (mac, ts))
             db.execute("""UPDATE device_profiles SET owner = COALESCE(owner, ?),
@@ -618,8 +656,10 @@ CADENCE = {"8c:79:f5:0b:cd:12": (7, 13)}
 DEFAULT_CADENCE = (2, 7)
 # The parents' rule, typed the way they would: school nights (Sun-Thu) 22:00-07:00, after
 # 15 minutes of estimated screen time. Seeded once per demo DB (meta demo_rules=1).
-DEMO_RULE = {"name": "上學日晚上", "owner": "小孩", "mac": None, "days": list(SCHOOL_NIGHTS),
-             "start": "22:00", "end": "07:00", "min_minutes": 15, "enabled": True}
+def demo_rule(h: dict | None = None) -> dict:
+    h = h or HOUSEHOLDS[DEFAULT_HOUSEHOLD]
+    return {"name": h["rule"], "owner": h["kid"], "mac": None, "days": list(SCHOOL_NIGHTS),
+            "start": "22:00", "end": "07:00", "min_minutes": 15, "enabled": True}
 
 
 def _day_rng(story: str, day, key: str = "") -> random.Random:
@@ -688,12 +728,12 @@ def echo_last_week(db, now: datetime) -> int:
     return cur.rowcount
 
 
-def _seed_rules(db) -> None:
+def _seed_rules(db, h: dict | None = None) -> None:
     """The demo family's bedtime rule, once per demo DB (a rule the user deleted or
     edited stays as they left it)."""
     if store.get_meta(db, "demo_rules") == "1":
         return
-    store.save_bedtime_rule(db, dict(DEMO_RULE))
+    store.save_bedtime_rule(db, demo_rule(h))
     store.set_meta(db, "demo_rules", "1")
 
 
@@ -701,8 +741,18 @@ def _seed_rules(db) -> None:
 # the household's shared devices, and presence ON for Mom (work days) and the kid (school
 # days), each with 8 days of "seen at home" history from the light presence check.
 # Seeded once per demo DB (meta demo_people=1) and only into untouched fields.
-DEMO_PEOPLE = {"爸爸": ("👨", "blue", False, False), "媽媽": ("👩", "rose", False, True),
-               "小孩": ("🧒", "green", True, True)}   # name -> (avatar, color, child, presence)
+PEOPLE_KEYS = {"dad": ("👨", "blue", False, False), "mom": ("👩", "rose", False, True),
+               "kid": ("🧒", "green", True, True)}   # who -> (avatar, color, child, presence)
+
+
+def demo_people(h: dict | None = None) -> dict:
+    """name -> (avatar, color, child, presence) in household `h`'s words."""
+    h = h or HOUSEHOLDS[DEFAULT_HOUSEHOLD]
+    return {h[k]: v for k, v in PEOPLE_KEYS.items()}
+
+
+# the built-in (Taiwanese) household's values, as earlier stages and tests know them
+IDENTITY, PROFILES, DEMO_RULE, DEMO_PEOPLE = identity(), profiles(), demo_rule(), demo_people()
 DEMO_SHARED = ("8c:79:f5:0b:cd:12", "fc:65:de:33:77:aa")   # the TV and the Echo
 PRESENCE_PHONES = {"b2:55:3a:7c:10:9b": "work", "e6:3b:91:5d:22:c4": "school"}
 KID_PHONE, MOM_LAPTOP, DAD_NEW_MAC = "e6:3b:91:5d:22:c4", "c8:89:f3:10:4a:7e", "ea:12:7b:c0:5e:39"
@@ -825,21 +875,21 @@ def build_presence(db, now: datetime, tz) -> int:
     return store.insert_events(db, events)
 
 
-def _seed_people(db, now: datetime) -> None:
-    """The DEMO_PEOPLE / DEMO_SHARED notes, once per demo DB, never over the user's own."""
+def _seed_people(db, now: datetime, h: dict | None = None) -> None:
+    """The demo_people() / DEMO_SHARED notes, once per demo DB, never over the user's own."""
     if store.get_meta(db, "demo_people") == "1":
         return
     store.sync_people(db)
     ts = (now - timedelta(days=PROFILES_NOTED_DAYS_AGO)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     with db:
         for mac in (KID_PHONE, MOM_LAPTOP):   # demo DBs seeded before Stage P
-            owner, room = PROFILES[mac]
+            owner, room = profiles(h)[mac]
             db.execute("INSERT OR IGNORE INTO device_profiles (mac, owner, room, updated_at) "
                        "VALUES (?, ?, ?, ?)", (mac, owner, room, ts))
         for mac in DEMO_SHARED:
             db.execute("UPDATE device_profiles SET shared = 1 WHERE mac = ? AND owner IS NULL",
                        (mac,))
-        for name, (avatar, color, child, pres) in DEMO_PEOPLE.items():
+        for name, (avatar, color, child, pres) in demo_people(h).items():
             db.execute("INSERT OR IGNORE INTO people (name, created_at, updated_at) VALUES (?, ?, ?)",
                        (name, ts, ts))
             db.execute("""UPDATE people SET avatar = CASE avatar WHEN '' THEN ? ELSE avatar END,
@@ -1268,11 +1318,16 @@ def build_score_history(db, now: datetime, tz) -> int:
     return len(SCORE_HISTORY)
 
 
-def build(path: Path = DEMO_DB, now: datetime | None = None) -> dict:
+def build(path: Path = DEMO_DB, now: datetime | None = None, household: str | None = None) -> dict:
     """(Re)seed the demo home at `path`. The story is laid out relative to `now` (default:
     the wall clock, read ONCE here - nothing below reads it again), so two builds with the
-    same `now` write the same rows; tests pin it instead of racing the clock."""
+    same `now` write the same rows; tests pin it instead of racing the clock.
+    `household` (a HOUSEHOLDS key) picks the family's words on a NEW demo DB; a DB keeps
+    the household it was first seeded with (meta demo_household; older DBs: zh-Hant), so
+    the names rewritten on every build always match the owners the user already has."""
     RNG.seed(SEED)  # same home on every build, even several in one process
+    if household is not None and household not in HOUSEHOLDS:
+        raise ValueError(f"demo.build: unknown household {household!r}")
     if now is None:
         now = datetime.now(timezone.utc)
     elif now.tzinfo is None:
@@ -1302,7 +1357,13 @@ def build(path: Path = DEMO_DB, now: datetime | None = None) -> dict:
         db.execute("DELETE FROM sqlite_sequence WHERE name = 'outages'")
         db.execute("DELETE FROM score_history")
         db.execute("DELETE FROM presence_samples")
+    seeded = store.get_meta(db, "demo") == "1"
     store.set_meta(db, "demo", "1")
+    kept = store.get_meta(db, "demo_household")
+    if kept not in HOUSEHOLDS:
+        kept = DEFAULT_HOUSEHOLD if seeded else (household or DEFAULT_HOUSEHOLD)
+        store.set_meta(db, "demo_household", kept)
+    h = HOUSEHOLDS[kept]
 
     uniq = 0
     total_events = 0
@@ -1382,13 +1443,13 @@ def build(path: Path = DEMO_DB, now: datetime | None = None) -> dict:
                       WHERE (SELECT MAX(ts) FROM presence_samples WHERE mac = devices.mac)
                             > last_seen""")
     checks = build_port_checks(db, now)
-    build_identity(db, now)
+    build_identity(db, now, h)
     build_upnp(db, now)
     probes = build_health(db, now, tz)
     _seed_health(db, now, total_events, samples)
-    _seed_profiles(db, now)
-    _seed_people(db, now)
-    _seed_rules(db)
+    _seed_profiles(db, now, h)
+    _seed_people(db, now, h)
+    _seed_rules(db, h)
     _seed_suggestions(db)
     _seed_sessions(db, now)
     _seed_admin_session(db, now)
@@ -1403,7 +1464,7 @@ def build(path: Path = DEMO_DB, now: datetime | None = None) -> dict:
     from netwarden import cache
     cache.clear()     # the seeding computed alerts on a half-built home: never reuse those
     return {"devices": len(DEVICES), "events": total_events, "traffic_samples": samples,
-            "port_checks": checks, "health_probes": probes, "path": str(path)}
+            "port_checks": checks, "health_probes": probes, "path": str(path), "household": kept}
 
 
 def ensure(path: Path = DEMO_DB) -> bool:

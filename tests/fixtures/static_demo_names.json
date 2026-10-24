@@ -130,6 +130,18 @@
       "",
       "ja",
       "demo-data/ja/chat/af5c79b3.txt"
+    ],
+    [
+      "device",
+      "aa:bb:cc:00:11:22",
+      "en",
+      "demo-data/en/chat/13bda7bd.txt"
+    ],
+    [
+      "device",
+      "aa:bb:cc:00:11:22",
+      "zh-Hans",
+      "demo-data/zh-Hans/chat/13bda7bd.txt"
     ]
   ],
   "index": [

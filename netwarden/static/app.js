@@ -276,11 +276,18 @@ function api(path) { return url(path + (path.includes('?') ? '&' : '?') + 'lang=
 // Stage M: a 401 means this browser's session is gone (revoked / expired) -> pair again.
 // Stage G: the page was open, so this browser HAD access: /pair says the sign-in ended.
 function needPair(r) { clockFrom(r); if (r.status === 401) { location.replace(url('/pair?expired=1')); return true; } return false; }
+// A failed answer without a message of its own: a 404 is "not found" (in the static demo:
+// "not part of the demo" - there is no server to have an error), anything else the status.
+function httpMsg(j, status) {
+  if (j && typeof j.error === 'string' && j.error) return j.error;
+  if (status === 404) return T(DEMO ? 'app.demo.not_found' : 'err.not_found');
+  return T('app.err.http', { status });
+}
 async function getJSON(path) {
   const r = await fetch(api(path), { cache: 'no-store' });
   needPair(r);
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { const e = new Error(j.error || T('app.err.http', { status: r.status })); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error(httpMsg(j, r.status)); e.status = r.status; throw e; }
   return j;
 }
 async function postJSON(path, body) {
@@ -290,7 +297,7 @@ async function postJSON(path, body) {
   needPair(r);
   const j = await r.json().catch(() => ({}));
   // e.body: the server's answer (a settings error names its "key", a backup error its "section")
-  if (!r.ok) { const e = new Error(j.error || T('app.err.http', { status: r.status })); e.status = r.status; e.body = j; throw e; }
+  if (!r.ok) { const e = new Error(httpMsg(j, r.status)); e.status = r.status; e.body = j; throw e; }
   return j;
 }
 const isNetErr = e => e instanceof TypeError;   // fetch() rejects with TypeError when unreachable
@@ -653,6 +660,7 @@ function viewOverview() {
   const todo = S.data.inbox ? inboxCount() : items.length;
   const sugs = inboxItems().filter(it => it.kind === 'suggestion').length;
   return html`
+    ${demoWelcome()}
     ${setupNeeded() ? resumeCard() : (needsOnboarding() ? setupCard() : '')}
     ${sinceBanner()}
     ${quietCards()}
@@ -1823,7 +1831,8 @@ function sugCount() { return (S.data.sug && S.data.sug.counts && S.data.sug.coun
 const CHAT_KEY = 'netwarden.chat';
 function aiBadge() {
   const m = S.meta || {};
-  const off = { forced: 'ui.ai_offline_forced', chosen: 'ui.ai_offline_chosen' }[m.offline_reason] || 'ui.ai_offline';
+  if (DEMO) return T('app.demo.ai_mode');   // the visitor chose no flag: saved answers, no AI is called
+  const off = { forced: 'ui.ai_offline_forced', addon: 'ui.ai_offline_addon', chosen: 'ui.ai_offline_chosen' }[m.offline_reason] || 'ui.ai_offline';
   // These strings were written to be appended after a title ("· ..."): drop the lead-in.
   const s = m.ai_mode === 'offline' ? T(off) : (m.model ? T('ui.model', { model: m.model, provider: m.provider }) : '');
   return s.replace(/^[\s·・•|-]+/u, '');
@@ -2074,7 +2083,7 @@ function sseFrame(frame) {
 }
 // The answer's SSE stream (POST /api/chat/stream, or a saved one in the static demo) -> `reply`
 async function readAnswer(r, reply, alert) {
-  if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw uiError(j.error || T('app.err.http', { status: r.status })); }
+  if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw uiError(httpMsg(j, r.status)); }
   const reader = r.body.getReader(), dec = new TextDecoder();
   let buf = '', finished = false;
   while (!finished) {
@@ -2110,7 +2119,8 @@ function demoChatLoad() {
   if (DEMO_CHAT.p && DEMO_CHAT.lang === lang) return DEMO_CHAT.p;
   DEMO_CHAT.lang = lang; DEMO_CHAT.idx = null;
   DEMO_CHAT.p = fetch(window.NWDemo.chatIndex(lang)).then(r => (r.ok ? r.json() : null)).catch(() => null).then(j => {
-    const idx = { suggested: strList(j && j.suggested, 20) || [], answers: strList(j && j.answers, 40) || [], insight: !!(j && j.insight) };
+    const idx = { suggested: strList(j && j.suggested, 20) || [], answers: strList(j && j.answers, 40) || [], insight: !!(j && j.insight),
+                  devices: strList(j && j.devices, 200) || [] };
     if (DEMO_CHAT.lang === lang) { DEMO_CHAT.idx = idx; if (chatHere()) render(); }
     return idx;
   });
@@ -2124,6 +2134,13 @@ function demoAnswerable(list) {
 }
 async function demoAnswer(mode, q, signal) {
   const idx = await demoChatLoad();
+  // Round 10b: "Ask AI about this device" -> Ask, the pre-filled question as it was put in
+  // the box: the device's own saved answer (found by its MAC, not by the name in the text)
+  const ctx = S.chat.ctx;
+  if (mode === 'chat' && ctx && idx.devices.includes(ctx.mac) &&
+      String(q || '').trim() === T('app.ask_prefill', { name: ctx.name, mac: ctx.mac }).trim()) {
+    return fetch(window.NWDemo.chatFile('device', ctx.mac, S.lang), { signal });
+  }
   const ok = mode === 'insight' ? idx.insight : idx.answers.includes(String(q || '').trim());
   return ok ? fetch(window.NWDemo.chatFile(mode, q, S.lang), { signal }) : null;
 }
@@ -2429,7 +2446,7 @@ async function shareCopy(b) {
     const r = await fetch(api(shareUrl(Object.assign({}, S.share, { format: 'md' }))), { cache: 'no-store' });
     if (needPair(r)) return;
     const t = await r.text();
-    if (!r.ok) { let j = {}; try { j = JSON.parse(t); } catch (e) { /* not JSON */ } throw new Error(j.error || T('app.err.http', { status: r.status })); }
+    if (!r.ok) { let j = {}; try { j = JSON.parse(t); } catch (e) { /* not JSON */ } throw new Error(httpMsg(j, r.status)); }
     await copyText(t, b);
   } catch (e) { toast(errText(e), { kind: 'err' }); }
 }
@@ -2447,8 +2464,8 @@ function viewSystem() {
   const st = S.data.status;
   if (!st) return skeleton(3);
   const db = st.db, loops = Object.entries(st.loops || {});
-  // like health.ai_line(): offline by choice (--offline-ai / settings) is not "no key"
-  const why = st.ai.mode === 'offline' && ['forced', 'chosen'].includes(st.ai.reason) ? '_' + st.ai.reason : '';
+  // like health.ai_line(): offline by choice (--offline-ai / add-on option / settings) is not "no key"
+  const why = st.ai.mode === 'offline' && ['forced', 'addon', 'chosen'].includes(st.ai.reason) ? '_' + st.ai.reason : '';
   const aiMode = T('status.ai.' + st.ai.mode + why);
   return html`${phead(T('app.nav.system'), T('app.sys.version', { version: st.version }), demoPill())}
     <div class="grid">
@@ -3652,7 +3669,7 @@ function viewDrawer() {
 }
 function viewDevice() {
   const { d, act, tl, err } = S.dev;
-  if (err) return html`${drawerHead(icon('i-alert'), T('err.device_not_found'), S.dev.mac)}<div class="dbody">${empty('i-search', err)}</div>`;
+  if (err) return html`${drawerHead(icon('i-alert'), T('err.device_not_found'), S.dev.mac)}<div class="dbody">${empty('i-search', err)}${demoBack()}</div>`;
   if (!d) return html`${drawerHead(icon('t-unknown'), T('ui.loading'), S.dev.mac)}<div class="dbody"><div class="skel h"></div><div class="skel box"></div><div class="skel w8"></div></div>`;
   const inv = findDev(d.mac) || {};
   const online = inv.online, ti = d.type_info || {};
@@ -3743,7 +3760,7 @@ function viewDevice() {
 function viewLookup() {
   const L = S.look, title = S.route.name === 'domain' ? S.route.arg : ((L.r && L.r.name) || S.route.arg);
   const ic = icon(S.route.name === 'domain' ? 'i-globe' : 'i-box');
-  if (L.err) return html`${drawerHead(ic, title)}<div class="dbody">${empty('i-search', L.err)}</div>`;
+  if (L.err) return html`${drawerHead(ic, title)}<div class="dbody">${empty('i-search', L.err)}${demoBack()}</div>`;
   const r = L.r;
   if (!r) return html`${drawerHead(ic, title)}<div class="dbody"><div class="skel box"></div></div>`;
   return html`${drawerHead(ic, S.route.name === 'domain' ? r.domain : r.name, r.category_name)}
@@ -4294,6 +4311,42 @@ function demoBar() {
   morph(el, html`${icon('i-eye-off')}<span>${T('app.demo.banner')} <span class="demolinks">${ext(zh ? sd.install_url_zh : sd.install_url, T('app.demo.install'))}${ext(sd.source_url, T('app.demo.source'))}</span></span>
     <button type="button" class="btn icon sm quiet" data-act="demo-hide" aria-label="${T('app.demo.hide')}" title="${T('app.demo.hide')}">${icon('i-x')}</button>`);
 }
+// Round 10b: a drawer for something the demo home does not have (#/device/<any mac>): a
+// way back to the start instead of a dead end. Nothing in the real app.
+function demoBack() {
+  return DEMO ? html`<p class="demo-back"><a class="btn sm" href="#/">${icon('i-home')}${T('app.demo.back')}</a></p>` : '';
+}
+// Round 10b: first visit to the static demo - one card on top of Overview: what this is,
+// three findings the made-up home really has (taken from its own alerts, so the links can
+// never point at something that is not there) and the install guide. Dismissed for good
+// in this browser (localStorage); never in the real app.
+const DEMO_WELCOME_KEY = 'netwarden.demo.welcome_hidden';
+function demoWelcomeHidden() { try { return localStorage.getItem(DEMO_WELCOME_KEY) === '1'; } catch (e) { return false; } }
+function demoWelcome() {
+  if (!DEMO || S.demoWelcomeOff || demoWelcomeHidden()) return '';
+  const a = S.data.alerts || {}, sd = (S.meta && S.meta.static_demo) || {};
+  const first = (list, ok) => (list || []).find(x => x && x.mac && (!ok || ok(x)));
+  const finds = [
+    ['threat', first(a.threats)],
+    ['bypass', first(a.visibility, v => v.kind === 'bypass') || first(a.visibility)],
+    ['night', first(a.unusual_hours)],
+  ].filter(f => f[1]).map(([k, it]) => html`<li><a href="${devHref(it.mac)}">${T('app.demo.w.' + k, { name: devName(it.mac, it.name || it.device) })}</a></li>`);
+  const inst = /^zh/.test(S.lang) ? sd.install_url_zh : sd.install_url;
+  return html`<section class="card demo-welcome" data-key="demo-welcome" aria-labelledby="demoWelcomeH">
+    <div class="card-h"><h2 id="demoWelcomeH">${icon('i-spark')}${T('app.demo.w.title')}</h2>
+      <div class="card-a"><button type="button" class="btn icon sm quiet" data-act="demo-welcome-hide" aria-label="${T('app.demo.w.hide')}" title="${T('app.demo.w.hide')}">${icon('i-x')}</button></div></div>
+    <p>${T('app.demo.w.text')}</p>
+    ${finds.length ? html`<p class="hint">${T('app.demo.w.try')}</p><ul class="demo-finds">${finds}</ul>` : ''}
+    ${/^https:\/\//.test(inst || '') ? html`<p><a class="btn sm" href="${inst}" target="_blank" rel="noopener noreferrer">${icon('i-download')}${T('app.demo.install')}</a></p>` : ''}
+  </section>`;
+}
+function demoWelcomeHide() {
+  S.demoWelcomeOff = true;
+  try { localStorage.setItem(DEMO_WELCOME_KEY, '1'); } catch (e) { /* private mode: hidden until a reload */ }
+  render();
+  speak(T('app.demo.w.hidden'));
+  const h = $('#view h1'); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
+}
 function demoHide() {
   try { sessionStorage.setItem(DEMO_BAR_KEY, '1'); } catch (e) { /* private mode: hidden until a reload */ }
   const el = $('#demobar'); if (el) el.hidden = true;
@@ -4365,7 +4418,7 @@ async function getTagged(path, tag) {
   needPair(r);   // (+ netwarden's clock from the Date header)
   if (r.status === 304) return null;
   const t = await r.text();
-  if (!r.ok) { let j = {}; try { j = JSON.parse(t); } catch (e) { /* not JSON */ } const err = new Error(j.error || T('app.err.http', { status: r.status })); err.status = r.status; throw err; }
+  if (!r.ok) { let j = {}; try { j = JSON.parse(t); } catch (e) { /* not JSON */ } const err = new Error(httpMsg(j, r.status)); err.status = r.status; throw err; }
   return { tag: r.headers.get('etag') || '', text: t };
 }
 // a dataset's new value (or the old object when its hash is unchanged) -> did it change?
@@ -5382,6 +5435,7 @@ document.addEventListener('click', e => {
     case 'share-copy': shareCopy(b); break;
     case 'retry': refresh(); break;
     case 'demo-hide': demoHide(); break;
+    case 'demo-welcome-hide': demoWelcomeHide(); break;
     case 'boot-retry': bootRetry(true); break;
     case 'close': closeDrawer(); break;
     case 'theme': setTheme(b.dataset.v); break;
