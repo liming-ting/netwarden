@@ -147,7 +147,7 @@ def report_md(db, lang: str, hours: float = 24) -> str:
     if has_bw:
         cols += ["rx_bytes", "tx_bytes"]
     head = {"rx_bytes": "rx", "tx_bytes": "tx"}   # human units here, raw bytes in the CSV
-    lines += [f"## {i18n.tn("export.inventory_heading", len(inv), lang)}", ""]
+    lines += ["## " + i18n.tn("export.inventory_heading", len(inv), lang), ""]
     lines.append("| " + " | ".join(_md_cell(i18n.t("export.col." + head.get(c, c), lang,
                                                     days=EXPORT_DAYS)) for c in cols) + " |")
     lines.append("|" + "|".join("---" for _ in cols) + "|")

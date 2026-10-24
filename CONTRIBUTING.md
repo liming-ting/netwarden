@@ -29,7 +29,9 @@ human contributors and AI coding assistants alike. Design notes live in [docs/de
 
 ## Development setup
 
-Python 3.11 or newer on Linux, macOS or WSL2. Nothing to install:
+Python 3.11 or newer on Linux, macOS or WSL2 (code must still run on 3.11, CI's oldest
+version: no 3.12+ f-string forms such as `f"{d["k"]}"`, no 3.12+ standard-library names;
+`tests/test_py311_compat.py` catches these on newer Pythons). Nothing to install:
 
 ```bash
 git clone https://github.com/liming-ting/netwarden netwarden && cd netwarden

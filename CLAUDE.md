@@ -235,6 +235,7 @@ ONLY from v* tags; CI TZ=UTC + Asia/Taipei + `scripts/dev/tz_sweep.sh`; READMEs 
 
 ## Conventions
 - stdlib only; plain, commented style of `discovery.py` / `dns_ingest.py`; new sources = `dns_ingest.Source`-like adapters.
+- Python 3.11 syntax/stdlib only (CI runs 3.11, WSL has 3.12): no `f"{d["k"]}"`; tests/test_py311_compat.py guards it.
 - Tests never call the real LLM or network (fake providers, ephemeral 127.0.0.1). Must pass on a fresh copy, no `.env`, in ANY zone
   at ANY hour (tz_sweep.sh; `.env` NETWARDEN_TZ beats TZ); zone-specific expectations under `tests/tzkit.pinned_tz`; pin demo
   clocks (`demo.build(path, now=)`); weekday stories assert both branches.
