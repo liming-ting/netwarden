@@ -376,9 +376,11 @@ def _in(macs: list) -> tuple:
     return ",".join("?" * len(macs)), tuple(macs)
 
 
-def human_bytes(n: float) -> str:
+def human_bytes(n: float, lang: str) -> str:
+    """A size in the asking language's units: the offline answers show it as it is, and the
+    model reads "5,3 ГБ" as well as "5.3 GB" (round 10e)."""
     from netwarden.brain import human_bytes as hb   # brain imports us
-    return hb(n)
+    return hb(n, lang)
 
 
 # --- the tools -----------------------------------------------------------------
@@ -395,6 +397,9 @@ def t_list_devices(ctx: Ctx, a: dict) -> dict:
     dns = {r[0]: (r[1], r[2]) for r in db.execute(
         "SELECT device_mac, MAX(ts), COUNT(*) FROM dns_events WHERE device_mac IS NOT NULL "
         "AND ts >= ? GROUP BY device_mac", (since24,))}
+    from netwarden import dashboard   # the device list's own "last seen" (newest evidence)
+    seen = dashboard.last_active(db, since24)
+    here = dashboard.online_macs(db, seen, online_since)
     only, private = None, False
     if a.get("person"):
         who = resolve_person(ctx, a["person"])
@@ -411,8 +416,8 @@ def t_list_devices(ctx: Ctx, a: dict) -> dict:
         t = (types.get(mac) or {}).get("type", "unknown")
         if a.get("category") and t != a["category"]:
             continue
-        last = max(filter(None, (r["last_seen"], (dns.get(mac) or (None,))[0])))
-        online = last >= online_since
+        last = seen.get(mac) or r["last_seen"]
+        online = mac in here or last >= online_since
         if a["status"] == "online" and not online or a["status"] == "offline" and online:
             continue
         if new_since and r["first_seen"] < _iso(new_since):
@@ -440,6 +445,11 @@ def t_list_devices(ctx: Ctx, a: dict) -> dict:
     return out
 
 
+def _last_seen(ctx: Ctx, mac: str) -> str | None:
+    from netwarden import dashboard
+    return dashboard.last_active(ctx.db, _iso(ctx.now - timedelta(hours=24))).get(mac)
+
+
 def t_device_detail(ctx: Ctx, a: dict) -> dict:
     from netwarden import brain     # brain imports us
     db = ctx.db
@@ -455,7 +465,8 @@ def t_device_detail(ctx: Ctx, a: dict) -> dict:
            "shared": bool(p.get("shared")) or None,
            "model": " ".join(x for x in (ident.get("manufacturer"), ident.get("model")) if x) or None,
            "randomized_mac": bool(r["randomized"]) or None,
-           "first_seen": ctx.local(r["first_seen"]), "last_seen": ctx.local(r["last_seen"]),
+           "first_seen": ctx.local(r["first_seen"]),
+           "last_seen": ctx.local(_last_seen(ctx, mac) or r["last_seen"]),
            "trusted": (mac, "") in store.list_acks(db) or None}
     if snap_d:
         out.update(dns_lookups_24h=snap_d.get("queries"), blocked_24h=snap_d.get("blocked"),
@@ -473,8 +484,8 @@ def t_device_detail(ctx: Ctx, a: dict) -> dict:
             out["upnp_mappings"] = snap_d["upnp_mappings"]
         if snap_d.get("bandwidth"):
             bw = snap_d["bandwidth"]
-            out["data_24h"] = {"download": human_bytes(bw["rx_bytes"]),
-                               "upload": human_bytes(bw["tx_bytes"])}
+            out["data_24h"] = {"download": human_bytes(bw["rx_bytes"], ctx.lang),
+                               "upload": human_bytes(bw["tx_bytes"], ctx.lang)}
     else:
         out["dns_lookups_24h"] = 0
     return {k: v for k, v in out.items() if v is not None}
@@ -549,13 +560,14 @@ def t_traffic(ctx: Ctx, a: dict) -> dict:
     if macs is not None:
         tot = {m: v for m, v in tot.items() if m in set(macs)}
     ranked = sorted(tot.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))
-    rows = [{"name": ctx.name(m), "mac": m, "download": human_bytes(rx), "upload": human_bytes(tx),
-             "total": human_bytes(rx + tx), "total_bytes": rx + tx}
+    hb = lambda v: human_bytes(v, ctx.lang)   # noqa: E731
+    rows = [{"name": ctx.name(m), "mac": m, "download": hb(rx), "upload": hb(tx),
+             "total": hb(rx + tx), "total_bytes": rx + tx}
             for m, (rx, tx) in ranked[:a["limit"]]]
     all_rx = sum(v[0] for v in tot.values())
     all_tx = sum(v[1] for v in tot.values())
     return {**scope, **_win_out(w), "has_bandwidth": True, "devices_with_data": len(tot),
-            "total_download": human_bytes(all_rx), "total_upload": human_bytes(all_tx),
+            "total_download": hb(all_rx), "total_upload": hb(all_tx),
             "devices": rows}
 
 

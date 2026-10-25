@@ -121,11 +121,13 @@ def bypass(db, since: str) -> list:
 
 
 def quiet(db, now: datetime | None = None) -> list:
-    """Online (discovery) but silent in DNS for > QUIET_HOURS, although usually hourly."""
+    """Online (discovery) but silent in DNS for > QUIET_HOURS, although usually hourly.
+    The computer netwarden runs on is left out (as in never()): it is "online" because it
+    runs us, and its own lookups often take another path (WSL, Docker, the host resolver)."""
     now = now or datetime.now(timezone.utc)
     online_since = _iso(now - timedelta(hours=ONLINE_WITHIN_H))
     out = []
-    for d in db.execute("SELECT mac, last_seen FROM devices WHERE last_seen >= ?",
+    for d in db.execute("SELECT mac, last_seen FROM devices WHERE last_seen >= ? AND is_self = 0",
                         (online_since,)).fetchall():
         last = db.execute("SELECT MAX(ts) FROM dns_events WHERE device_mac = ?",
                           (d["mac"],)).fetchone()[0]

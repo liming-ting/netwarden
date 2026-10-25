@@ -206,17 +206,35 @@ function fmtInit() {
         day: new Intl.DateTimeFormat(l, { month: 'numeric', day: 'numeric' }),   // server-local dates, as they are
         rt: new Intl.RelativeTimeFormat(l, { numeric: 'auto' }), units: {} };
 }
+// Round 10e: every unit and percent goes through here (and i18n.unit / pct / size on the
+// server, pinned to the same Intl output by tests/fixtures/intl_formats.json); a text never
+// writes "%" or "ms" next to a placeholder.
 const fmt = {
   num: n => F.n.format(n || 0),
-  pct: x => F.p.format(x || 0),
+  // x = a fraction (0.14 -> "14%", "14 %"); sign = "+118 %" for a rise
+  pct(x, sign) {
+    if (!sign) return F.p.format(x || 0);
+    F.units.psign = F.units.psign || new Intl.NumberFormat(F.l, { style: 'percent', maximumFractionDigits: 0, signDisplay: 'exceptZero' });
+    return F.units.psign.format(x || 0);
+  },
+  // a failure rate: one place below 10 % ("8.2%"), whole above - as nethealth._fmt_pct, so
+  // the Network health summary and its tiles show the same figure
+  rate(x) {
+    const d = x > 0 && x < 0.1 ? 1 : 0, key = 'rate.' + d;
+    F.units[key] = F.units[key] || new Intl.NumberFormat(F.l, { style: 'percent', maximumFractionDigits: d });
+    return F.units[key].format(x || 0);
+  },
+  unit(v, k, d) {
+    const key = k + '.' + d;
+    F.units[key] = F.units[key] || new Intl.NumberFormat(F.l, { style: 'unit', unit: k, unitDisplay: 'short', maximumFractionDigits: d });
+    return F.units[key].format(v || 0);
+  },
+  ms: v => fmt.unit(v, 'millisecond', Math.abs(v || 0) < 10 ? 1 : 0),
   bytes(n) {
     const u = ['byte', 'kilobyte', 'megabyte', 'gigabyte', 'terabyte'];
     let i = 0; n = n || 0;
     while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
-    const k = u[i];
-    F.units[k] = F.units[k] || new Intl.NumberFormat(F.l, { style: 'unit', unit: k, unitDisplay: 'short',
-                                                             maximumFractionDigits: i ? 1 : 0 });
-    return F.units[k].format(n);
+    return fmt.unit(n, u[i], i ? 1 : 0);
   },
   date(iso) { const t = parseTs(iso); return t ? F.dt.format(new Date(t)) : '—'; },
   day(d) { return F.day.format(new Date(d + 'T12:00:00')); },
@@ -780,7 +798,7 @@ function groups(list) {
 }
 function devCols() {
   const cols = [['name', T('ui.th_device')], ['type', T('ui.type')], ['owner', T('app.owner')], ['room', T('app.room')],
-                ['ip', T('ui.th_ip')], ['last', T('app.last_seen')], ['queries', T('ui.th_queries'), 1], ['privacy', T('ui.th_privacy')]];
+                ['ip', T('ui.th_ip')], ['last', T('app.last_seen')], ['queries', T('app.d.th_queries_24h'), 1], ['privacy', T('ui.th_privacy')]];
   if (S.data.inv && S.data.inv.has_bandwidth) cols.push(['traffic', T('bw.col'), 1]);
   return cols;
 }
@@ -808,12 +826,12 @@ function devRow(d, cols) {
   return html`<tr data-key="${d.mac || dname(d)}" class="${d.online ? '' : 'off'}${d.mac && isFlash('dev:' + d.mac) ? ' flash' : ''}">
     <td class="c-dev"><div class="dev-pick">${d.mac ? html`<input type="checkbox" class="pick" name="pick" data-bulk="${d.mac}"${S.bulk.has(d.mac) ? ' checked' : ''} aria-label="${T('app.bulk.pick', { name: dname(d) })}">` : ''}<a class="dev" href="${d.mac ? devHref(d.mac) : '#/devices'}"><span class="ticon">${typeIcon(d.type)}<i class="dot${d.online ? ' on' : ''}"></i></span>
       <span class="dn"><span class="n">${dname(d)}</span><span class="sub">${sub}</span></span></a></div>${badges(d)}</td>
-    <td class="c-type" data-label="${T('ui.type')}" title="${ti.reason ? T('ui.type_reason', { reason: ti.reason, pct: Math.round((ti.confidence || 0) * 100) }) : ''}">${ti.type_name || '—'}${ti.source !== 'user' && (ti.confidence || 0) < 0.5 ? html` <span class="faint">?</span>` : ''}</td>
+    <td class="c-type" data-label="${T('ui.type')}" title="${ti.reason ? T('ui.type_reason', { reason: ti.reason, pct: fmt.pct(ti.confidence || 0) }) : ''}">${ti.type_name || '—'}${ti.source !== 'user' && (ti.confidence || 0) < 0.5 ? html` <span class="faint">?</span>` : ''}</td>
     <td class="c-clip" data-label="${T('app.owner')}" title="${d.owner || ''}">${d.owner || html`<span class="faint">—</span>`}</td>
     <td class="c-clip" data-label="${T('app.room')}" title="${d.room || ''}">${d.room || html`<span class="faint">—</span>`}</td>
     <td class="mono" data-label="${T('ui.th_ip')}">${(d.ips || []).join(', ') || '—'}</td>
     <td class="c-seen" data-label="${T('app.last_seen')}">${lastSeen(d)}</td>
-    <td class="num" data-label="${T('ui.th_queries')}">${fmt.num(d.queries)}${d.blocked ? html` <span class="faint" title="${T('ui.th_blocked')}">(${fmt.num(d.blocked)})</span>` : ''}</td>
+    <td class="num" data-label="${T('app.d.th_queries_24h')}">${fmt.num(d.queries)}${d.blocked ? html` <span class="faint" title="${T('ui.th_blocked')}">(${fmt.num(d.blocked)})</span>` : ''}</td>
     <td data-label="${T('ui.th_privacy')}">${d.privacy ? grade(d.privacy.grade) : html`<span class="faint">—</span>`}</td>
     ${bw ? html`<td class="num" data-label="${T('bw.col')}">${d.bandwidth ? html`↓ ${fmt.bytes(d.bandwidth.rx_bytes)}<br>↑ ${fmt.bytes(d.bandwidth.tx_bytes)}` : '—'}</td>` : ''}
     <td class="c-act">${d.mac ? html`<button type="button" class="btn icon sm quiet" data-act="edit" data-mac="${d.mac}" aria-label="${T('app.edit_device', { name: dname(d) })}" title="${T('app.edit')}">${icon('i-edit')}</button>` : ''}</td>
@@ -1096,7 +1114,7 @@ function weekMetric(label, m, fmtv, pts) {
   if (!m) return '';
   const delta = pts != null ? m.pts : m.pct;
   const dir = delta == null || delta === 0 ? '' : (delta > 0 ? 'up' : 'down');
-  const d = delta == null ? '' : (pts != null ? TN('app.fam.pts', Math.abs(delta), { n: (delta > 0 ? '+' : '') + fmt.num(delta) }) : (delta > 0 ? '+' : '') + fmt.num(delta) + '%');
+  const d = delta == null ? '' : (pts != null ? TN('app.fam.pts', Math.abs(delta), { n: (delta > 0 ? '+' : '') + fmt.num(delta) }) : fmt.pct(delta / 100, true));
   return html`<div class="tile wk"><div class="k">${label}</div><div class="v">${keepUnit(fmtv(m.this))}</div>
     <div class="d">${d ? html`<span class="delta ${dir}">${d}</span> · ` : ''}${T('app.fam.last_week', { v: keepUnit(fmtv(m.last)) })}</div></div>`;
 }
@@ -1291,7 +1309,9 @@ function toggleBedRule(id, undoing) {
 // computer only). Everything here is the user's own notes, with Undo; #/people/<id> = one person.
 const PPL_COLORS = ['blue', 'green', 'amber', 'rose', 'violet', 'teal', 'orange', 'slate'];
 const PRES_TAG = { home: 'tag-ok', probably_home: 'tag-acc', away: '', unknown: 'tag-warn' };
-function persons() { return (S.ppl.r && S.ppl.r.people) || S.persons || []; }
+// ONE list of people for every picker (round 10e: the People page's own copy stayed in the
+// first language after a switch); loadChoices() and loadPeople() both write it
+function persons() { return S.persons || []; }
 function personById(id) { return persons().find(p => p.id === id) || null; }
 function personOf(d) { return d && d.owner ? persons().find(p => p.name === d.owner) || null : null; }
 function initialsOf(name) {
@@ -1642,7 +1662,7 @@ const LEVEL_ICON = { ok: 'i-check', warn: 'i-alert', bad: 'i-alert', idle: 'i-pu
 const PILLAR_ICON = { security: 'i-shield', privacy: 'i-eye-off', health: 'i-wifi', tidiness: 'i-devices', family: 'i-family' };
 const SEV_TAG = { high: 'tag-bad', medium: 'tag-warn', low: '' };
 const SUG_TABS = ['open', 'done', 'snoozed', 'dismissed'];
-const ms = v => (v == null ? '—' : T('app.h.ms', { n: v >= 10 ? fmt.num(Math.round(v)) : String(Math.round(v * 10) / 10) }));
+const ms = v => (v == null ? '—' : fmt.ms(v));
 // A number and its unit stay on one line in a narrow tile label ("(24 h)", "7 Tage").
 const keepUnit = s => String(s).replace(/(\d) (?=\S)/g, '$1 ');
 function tileA(href, k, v, d, cls) {
@@ -1668,7 +1688,7 @@ function sparkline(series, label) {
 function dnsDays(days) {
   if (!days || !days.length) return html`<div class="hint">${T('app.h.no_dns')}</div>`;
   const maxMs = Math.max(1, ...days.map(d => d.avg_ms || 0)), maxF = Math.max(0.01, ...days.map(d => d.fail_rate || 0));
-  const row = (cls, f) => html`<div class="bars h-bars ${cls}">${days.map(d => html`<div class="b" title="${TN('app.h.dns_bar', d.queries, { day: fmt.day(d.date), ms: ms(d.avg_ms), pct: fmt.pct(d.fail_rate || 0) })}">
+  const row = (cls, f) => html`<div class="bars h-bars ${cls}">${days.map(d => html`<div class="b" title="${TN('app.h.dns_bar', d.queries, { day: fmt.day(d.date), ms: ms(d.avg_ms), pct: fmt.rate(d.fail_rate || 0) })}">
     <div class="col"><i style="--h:${f(d).toFixed(1)}%"></i></div><span>${fmt.day(d.date)}</span></div>`)}</div>`;
   return html`<div class="hint">${T('app.h.dns_speed')}</div>${row('speed', d => 100 * (d.avg_ms || 0) / maxMs)}
     <div class="hint">${T('app.h.dns_fail')}</div>${row('fail', d => 100 * (d.fail_rate || 0) / maxF)}`;
@@ -1701,7 +1721,7 @@ function serverCard(s) {
       ${s.blocked != null ? html`<li><span class="grow">${T('app.h.server_blocked')}</span><span class="num">${fmt.num(s.blocked)}</span></li>` : ''}
       ${s.avg_ms != null ? html`<li><span class="grow">${T('app.h.server_avg')}</span><span class="num">${ms(s.avg_ms)}</span></li>` : ''}
       ${(s.upstreams || []).map(u => html`<li data-key="u-${u.name}"><code class="grow">${u.name}</code><span class="num">${ms(u.avg_ms)}</span></li>`)}</ul>
-    <div class="hint">${T('app.h.server_when', { when: fmt.rel(s.ts) })}</div>` });
+    <div class="hint">${T('app.h.server_when', { when: fmt.rel(s.ts) })} ${T('app.h.server_scope')}</div>` });
 }
 function viewHealth() {
   const h = S.data.health;
@@ -1718,7 +1738,7 @@ function viewHealth() {
       <div><h2>${v.title}</h2><p>${v.text}</p></div></section>
     <div class="tiles">
       ${tileA('#/health', T('app.h.router'), gw.measured ? ms(gwMs) : '—', gwSub)}
-      ${tileA('#/health', T('app.h.dns'), dns.measured ? ms(dns.avg_ms) : '—', dns.measured ? T('app.h.fails', { pct: fmt.pct(dns.fail_rate || 0) }) : T('app.h.not_measured'))}
+      ${tileA('#/health', T('app.h.dns'), dns.measured ? ms(dns.avg_ms) : '—', dns.measured ? T('app.h.fails', { pct: fmt.rate(dns.fail_rate || 0) }) : T('app.h.not_measured'))}
       ${tileA('#/health', T('app.h.outages_7d'), fmt.num(h.outages_7d), T('app.h.outages_sub'))}
       ${tileA('#/health', T('app.h.internet'), inet.configured ? (inet.latest ? T(inet.latest.ok ? 'app.h.up' : 'app.h.down') : '…') : T('app.h.off'), inet.configured ? inet.target : T('app.h.probe_hint'))}
     </div>
@@ -1874,9 +1894,12 @@ function aiSub(compact) {
 function chatHere() { return S.base === 'ai' ? 'page' : (S.chat.open ? 'panel' : null); }
 // Questions worth asking about THIS network right now (localized), most pressing first.
 function suggestions() {
-  if (DEMO) {   // the static demo: only questions it has an answer for
+  if (DEMO) {   // the static demo: only questions it has an answer for, in the live page's order
     const idx = demoChatIndex(), asked = new Set(S.chat.messages.filter(m => m.role === 'user').map(m => m.content.trim()));
-    return idx ? idx.suggested.filter(q => !asked.has(q)).slice(0, 6) : [];
+    if (!idx) return [];
+    // round 10e: the side panel of a device leads with "Tell me about <device>" (its saved answer)
+    const dev = demoDeviceChip(idx);
+    return (dev ? [dev] : []).concat(idx.suggested).filter(q => !asked.has(q)).slice(0, 6);
   }
   const out = [], seen = new Set(), add = (k, o) => { const t = T(k, o); if (!seen.has(t)) { seen.add(t); out.push(t); } };
   const a = S.data.alerts || {}, ctx = S.chat.ctx;
@@ -2205,6 +2228,11 @@ function demoChatLoad() {
   return DEMO_CHAT.p;
 }
 function demoChatIndex() { demoChatLoad(); return DEMO_CHAT.idx; }   // null until it has loaded (then it renders)
+// the focused device's chip (app.ai.q.device), when that device has a saved answer
+function demoDeviceChip(idx) {
+  const ctx = S.chat.ctx;
+  return ctx && idx && idx.devices.includes(ctx.mac) ? T('app.ai.q.device', { name: ctx.name }).trim() : null;
+}
 function demoAnswerable(list) {
   if (!DEMO || !list) return list;
   const idx = DEMO_CHAT.idx;
@@ -2215,8 +2243,10 @@ async function demoAnswer(mode, q, signal) {
   // Round 10b: "Ask AI about this device" -> Ask, the pre-filled question as it was put in
   // the box: the device's own saved answer (found by its MAC, not by the name in the text)
   const ctx = S.chat.ctx;
+  // (round 10e: its chip "Tell me about <device>" is answered by the same device profile)
+  const asked = String(q || '').trim();
   if (mode === 'chat' && ctx && idx.devices.includes(ctx.mac) &&
-      String(q || '').trim() === T('app.ask_prefill', { name: ctx.name, mac: ctx.mac }).trim()) {
+      (asked === T('app.ask_prefill', { name: ctx.name, mac: ctx.mac }).trim() || asked === demoDeviceChip(idx))) {
     return fetch(window.NWDemo.chatFile('device', ctx.mac, S.lang), { signal });
   }
   const ok = mode === 'insight' ? idx.insight : idx.answers.includes(String(q || '').trim());
@@ -2785,7 +2815,7 @@ function aiTestResult() {
   if (!r.ok) return html`<div class="ai-test" role="status"><span class="tag tag-bad">${icon('i-alert')}${T('app.ai.test_failed', { error: r.error_text || '' })}</span>
     ${r.error ? html`<div class="hint">${r.error}</div>` : ''}</div>`;
   return html`<div class="ai-test" role="status">
-    <div><span class="tag tag-ok">${icon('i-check')}${TN('app.ai.test_ok', r.models.length, { server: r.server, ms: fmt.num(r.latency_ms) })}</span></div>
+    <div><span class="tag tag-ok">${icon('i-check')}${TN('app.ai.test_ok', r.models.length, { server: r.server, ms: fmt.ms(r.latency_ms) })}</span></div>
     ${r.model ? (r.model_found === false ? html`<div class="hint warn">${T('app.ai.test_missing', { model: r.model })}</div>` : '')
               : html`<div class="hint">${T('app.ai.test_no_model')}</div>`}
     ${r.reply != null ? html`<div class="hint">${T('app.ai.test_reply', { reply: r.reply })}</div>` : ''}
@@ -2869,6 +2899,16 @@ async function openPreview() {
   catch (e) { S.ai.prev.err = errText(e); }
   if (S.ai.prev.open) renderPreview();
 }
+// the open preview asked again (a language switch): the dialog keeps its place and focus
+async function reloadPreview() {
+  const p = S.ai.prev;
+  if (!p.open) return;
+  Object.assign(p, { r: null, err: null });
+  renderPreview();
+  try { const r = await postJSON('/api/chat/preview', previewRequest()); if (S.ai.prev === p) p.r = r; }
+  catch (e) { if (S.ai.prev === p) p.err = errText(e); }
+  if (S.ai.prev === p && p.open) renderPreview();
+}
 function closePreview() {
   const p = S.ai.prev;
   if (!p.open) return;
@@ -2940,7 +2980,7 @@ function inboxRow(it, i) {
     <span class="att-ic">${icon(INBOX_ICON[it.kind] || 'i-alert')}</span>
     <div class="att-b"><div class="att-t"><span class="tag tag-${it.kind === 'threat' ? 'threat' : it.kind}">${inboxTag(it)}</span><a class="ib-title" href="${it.href}">${it.title}</a></div>
       <div class="att-x">${it.text}${it.when ? html` · <span class="muted" title="${fmt.date(it.when)}">${fmt.rel(it.when)}</span>` : ''}</div>
-      ${it.fix ? html`<a class="ib-fix" href="#/suggestions" data-act="sug-goto" data-id="${it.fix.sid}">${icon('i-bulb')}<span>${T('app.inbox.how_to_fix')}: ${it.fix.title}</span></a>` : ''}
+      ${it.fix ? html`<a class="ib-fix" href="#/suggestions" data-act="sug-goto" data-id="${it.fix.sid}">${icon('i-bulb')}<span>${T('app.inbox.how_to_fix_line', { title: it.fix.title })}</span></a>` : ''}
       ${it.why ? whyPart('i|' + it.id, it.why, it.title, it.name) : ''}</div>
     ${inboxActs(it)}</li>`;
 }
@@ -3199,7 +3239,7 @@ function connRow(n) {
   const cloud = n === 'ai' && S.ai.s && S.ai.s.ai && S.ai.s.ai.ai_mode === 'anthropic';
   let res = '';
   if (busy) res = html`<span class="muted">${T('app.conn.testing')}</span>`;
-  else if (r && r.ok) res = html`<span class="tag tag-ok">${icon('i-check')}${T('app.conn.ok', { ms: fmt.num(r.latency_ms) })}</span>`;
+  else if (r && r.ok) res = html`<span class="tag tag-ok">${icon('i-check')}${T('app.conn.ok', { ms: fmt.ms(r.latency_ms) })}</span>`;
   else if (r) res = html`<span class="tag tag-bad">${icon('i-alert')}${r.error_text}</span>`;
   return html`<tr data-key="${n}"><th scope="row">${T('app.conn.' + n)}${inUse ? html` <span class="tag tag-ok">${T('app.conn.in_use')}</span>` : ''}</th>
     <td><span class="tag${conf ? ' tag-ok' : ''}">${T(conf ? 'app.ai.key_set' : 'app.conn.not_set')}</span></td>
@@ -3639,7 +3679,7 @@ function wzBody(step, s) {
           <dt>${T('status.col_last_ok')}</dt><dd>${d.last_ok_ts ? fmt.rel(d.last_ok_ts) : T('status.never')}</dd>
           <dt>${T('app.wz.dns_events')}</dt><dd>${fmt.num(s.dns_events)}</dd></dl>
         <div class="ai-acts"><button type="button" class="btn ghost" data-act="wz-test"${t === 'busy' ? ' disabled' : ''}>${icon('i-pulse')}${T('app.conn.test')}</button>
-          <span aria-live="polite">${t && t !== 'busy' ? (t.ok ? html`<span class="tag tag-ok">${icon('i-check')}${T('app.conn.ok', { ms: fmt.num(t.latency_ms) })}</span>` : html`<span class="tag tag-bad">${icon('i-alert')}${t.error_text}</span>`) : ''}</span></div>`
+          <span aria-live="polite">${t && t !== 'busy' ? (t.ok ? html`<span class="tag tag-ok">${icon('i-check')}${T('app.conn.ok', { ms: fmt.ms(t.latency_ms) })}</span>` : html`<span class="tag tag-bad">${icon('i-alert')}${t.error_text}</span>`) : ''}</span></div>`
         : html`<p class="hint warn">${icon('i-alert')} ${T('app.wz.dns_none')}</p>
           <div class="cmd"><code>${DNS_ENV_LINES}</code>${copyBtn(DNS_ENV_LINES)}</div>
           <p class="hint">${T('app.wz.dns_pihole')}</p>`}
@@ -3786,7 +3826,7 @@ function viewDevice() {
           <dt>${T('app.d.mac')}</dt><dd class="mono">${d.mac}${d.randomized ? html` <span class="tag">${T('app.d.randomized')}</span>` : ''}</dd>
           <dt>${T('app.d.first_seen')}</dt><dd>${d.first_seen ? html`${fmt.date(d.first_seen)} <span class="muted">(${fmt.rel(d.first_seen)})</span>` : '—'}</dd>
           <dt>${T('app.last_seen')}</dt><dd>${inv.last_active ? html`${fmt.date(inv.last_active)} <span class="muted">(${fmt.rel(inv.last_active)})</span>` : (d.last_seen ? fmt.date(d.last_seen) : '—')}</dd>
-          <dt>${T('ui.type')}</dt><dd>${ti.type_name || '—'} <span class="muted">${ti.reason ? '· ' + T('ui.type_reason', { reason: ti.reason, pct: Math.round((ti.confidence || 0) * 100) }) : ''}</span></dd>
+          <dt>${T('ui.type')}</dt><dd>${ti.type_name || '—'} <span class="muted">${ti.reason ? '· ' + T('ui.type_reason', { reason: ti.reason, pct: fmt.pct(ti.confidence || 0) }) : ''}</span></dd>
         </dl>` })}
       ${dal.length || tuned.length ? card({ key: 'alerts', icon: 'i-alert', title: T('app.d.alerts'), body: alertsBody }) : ''}
       ${(id.evidence || []).length ? card({ key: 'ident', icon: 'i-search', title: T('app.ident.title'), body: html`<ul class="rows">${id.evidence.map(e => html`<li data-key="${e.source}">
@@ -3796,7 +3836,7 @@ function viewDevice() {
       ${card({ key: 'svc', icon: 'i-globe', title: T('app.d.services'), body: html`
         ${(d.services || []).length ? html`<div class="svc-chips">${(d.top_domains || []).filter((t, i, a) => t.service_id && a.findIndex(x => x.service_id === t.service_id) === i)
           .map(t => html`<a class="chip" href="#/service/${enc(t.service_id)}">${t.service}</a>`)}</div>` : ''}
-        ${(d.top_domains || []).length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${T('ui.th_domain')}</th><th>${T('ui.th_service')}</th><th class="num">${T('ui.th_queries')}</th></tr></thead>
+        ${(d.top_domains || []).length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${T('ui.th_domain')}</th><th>${T('ui.th_service')}</th><th class="num">${T('app.d.th_queries_24h')}</th></tr></thead>
           <tbody>${d.top_domains.map(t => html`<tr data-key="${t.domain}"><td><a href="#/domain/${enc(t.domain)}"><code>${t.domain}</code></a>${t.blocked ? html` <span class="tag tag-warn">${T('ui.th_blocked_short')}</span>` : ''}${t.routine ? html` <span class="tag tag-routine" title="${t.routine.text}">${t.routine.name}</span>` : ''}</td>
             <td>${t.service_id ? html`<a href="#/service/${enc(t.service_id)}">${t.service}</a>` : (t.service || '—')}</td><td class="num">${fmt.num(t.count)}</td></tr>`)}</tbody></table></div>
           <div class="hint">${T('app.d.lookup_hint')}</div>` : empty('i-globe', T('app.d.no_dns'))}` })}
@@ -3816,7 +3856,7 @@ function viewDevice() {
         ${(d.bandwidth_trend || []).some(x => x.rx_bytes || x.tx_bytes) ? bwBars(d.bandwidth_trend) : html`<div class="hint" style="margin-top:0">${T(d.has_bandwidth ? 'bw.no_device' : 'bw.no_sensor')}</div>`}` })}
       ${card({ key: 'priv', icon: 'i-eye-off', title: T('app.nav.privacy'), body: pv ? html`
         <div style="display:flex;gap:var(--s3);align-items:center">${grade(pv.grade, true)}<div>${T('ui.privacy_line', { grade: pv.grade, reason: pv.reason })}</div></div>
-        ${(pv.top_trackers || []).length ? html`<div class="tbl-wrap section-gap"><table class="tbl"><thead><tr><th>${T('ui.th_tracker')}</th><th>${T('ui.th_category')}</th><th>${T('ui.th_company')}</th><th class="num">${T('ui.th_queries')}</th><th class="num">${T('ui.th_blocked_short')}</th></tr></thead>
+        ${(pv.top_trackers || []).length ? html`<div class="tbl-wrap section-gap"><table class="tbl"><thead><tr><th>${T('ui.th_tracker')}</th><th>${T('ui.th_category')}</th><th>${T('ui.th_company')}</th><th class="num">${T('app.d.th_queries_24h')}</th><th class="num">${T('ui.th_blocked_short')}</th></tr></thead>
           <tbody>${pv.top_trackers.map(t => html`<tr data-key="${t.entry}"><td><a href="#/domain/${enc(t.entry)}"><code>${t.entry}</code></a></td><td>${t.category_name}</td><td>${t.company || '—'}</td>
             <td class="num">${fmt.num(t.count)}</td><td class="num">${t.blocked ? fmt.num(t.blocked) : ''}</td></tr>`)}</tbody></table></div>
           ${pv.rules && pv.rules.adguard ? rulesBox(pv.rules) : ''}` : ''}` : empty('i-eye-off', T('app.d.no_dns')) })}
@@ -3850,7 +3890,8 @@ function viewLookup() {
         ${r.tracker ? html`<p style="margin:0">${T('ui.flag_tracker', { category: r.tracker.category_name })}${r.tracker.company ? ' · ' + r.tracker.company : ''}</p>` : ''}` }) : ''}
       ${card({ key: 'who', icon: 'i-devices', title: T('ui.lookup_used_by', { days: r.days }), body: (r.devices || []).length ? html`<ul class="rows">${r.devices.map(d => html`<li data-key="${d.mac || d.name}">
           <span class="grow">${d.mac ? html`<a href="${devHref(d.mac)}">${rowName(d)}</a>` : d.name}
-          <div class="muted" style="font-size:var(--fs-xs)">${T('app.look.line', { n: fmt.num(d.queries), first: fmt.date(d.first_seen), last: fmt.rel(d.last_seen) })}</div></span></li>`)}</ul>`
+          <div class="muted" style="font-size:var(--fs-xs)">${d.queries_24h != null ? T('app.look.line_24h', { n: fmt.num(d.queries), day: fmt.num(d.queries_24h), first: fmt.date(d.first_seen), last: fmt.rel(d.last_seen) })
+            : T('app.look.line', { n: fmt.num(d.queries), first: fmt.date(d.first_seen), last: fmt.rel(d.last_seen) })}</div></span></li>`)}</ul>`
         : empty('i-devices', T('ui.timeline_empty')) })}
       ${(r.domains || []).length > 1 ? card({ key: 'doms', icon: 'i-globe', title: T('ui.search_domains'), body: html`<div class="svc-chips">${r.domains.slice(0, 40).map(x => html`<a class="chip" href="#/domain/${enc(x)}"><code>${x}</code></a>`)}</div>` }) : ''}
     </div>`;
@@ -4991,26 +5032,61 @@ async function setLang(code, persist) {
 // [what, when (is it on screen or cached?), how]. Each source is asked once, only when it
 // is shown or kept; pages fetched per visit (family, people, hygiene, a device drawer) come
 // with refresh(), others (tuning, pairing, setup) again on their next visit.
+// Round 10e: the 4th column names the parts of S each row keeps current (a page's data kept
+// after leaving the page is forgotten - its next visit fetches it - so no visit starts in the
+// old language); LANG_NEUTRAL lists the rest of S, which holds no translated text. A new key
+// of S must go in one of the two (tests/js/lang_switch_test.js).
 const FRESH_PAGES = ['system', 'settings', 'welcome'];
 const LANG_DEPS = [
-  ['lookup drawer', () => drawerOpen() && S.route.name !== 'device', () => { S.look = { key: S.route.name + ':' + S.route.arg }; loadLookup(); }],
-  ['choices', () => true, () => loadChoices()],
-  ['datasets', () => true, () => refresh()],
-  ['since', () => !!S.since.r, () => sinceLoad()],
+  ['lookup drawer', () => drawerOpen() && S.route.name !== 'device', () => { S.look = { key: S.route.name + ':' + S.route.arg }; loadLookup(); }, ['look']],
+  // the pickers' person / room / type names (the device drawer's selects, filters, the map):
+  // persons() reads S.persons only, never a page's own copy
+  ['choices', () => true, () => loadChoices(), ['types', 'people', 'rooms', 'persons']],
+  // the Overview's datasets, the error line, and the page open now (device drawer, family,
+  // people, hygiene: refresh() loads those that are on screen)
+  ['datasets', () => true, () => refresh(), ['data', 'loadErr', 'dev']],
+  ['kept pages', () => true, () => forgetKept(), ['fam.st', 'fam.wk', 'fam.bed', 'fam.err', 'ppl.r', 'ppl.det', 'ppl.err',
+                                                   'ppl.detErr', 'ai.test', 'set.errs', 'set.tests']],
+  ['since', () => !!S.since.r, () => sinceLoad(), ['since']],
   // the settings list: its page AND the palette's Settings entries (round 10d: a list kept
   // from another page stayed in the old language)
   ['settings list', () => !!S.meta && !S.meta.remote && (!!S.ai.s || FRESH_PAGES.includes(S.base)),
-   () => loadAI().then(() => { if (S.pal.open) renderPalette(); })],
-  ['pairing', () => FRESH_PAGES.includes(S.base), () => loadPair()],
-  ['setup', () => S.base === 'welcome', () => loadSetup()],
-  ['tuning', () => S.base === 'settings', () => loadTuning()],
-  ['channels', () => S.base === 'settings', () => loadPush()],
-  ['delivery log', () => S.base === 'settings' && S.push.logOpen != null, () => pushLogLoad(S.push.logOpen)],
-  ['channel preview', () => !!S.push.ed, () => pushPreview(true)],
-  ['palette', () => S.pal.open, () => { S.pal.remote = null; renderPalette(); }],
-  ['shortcuts', () => S.keys.open, () => keysBody()],
-  ['toasts', () => true, () => relabelToasts()],
+   () => loadAI().then(() => { if (S.pal.open) renderPalette(); }), ['ai.s', 'ai.err', 'ai.usage']],
+  ['pairing', () => FRESH_PAGES.includes(S.base), () => loadPair(), ['pair']],
+  ['setup', () => S.base === 'welcome', () => loadSetup(), ['setup']],
+  // S.tune off its page: only kinds / levels (the alert sheet's "all devices" level) are read
+  ['tuning', () => S.base === 'settings', () => loadTuning(), ['tune']],
+  ['channels', () => S.base === 'settings', () => loadPush(), ['push.d', 'push.err']],
+  ['delivery log', () => S.base === 'settings' && S.push.logOpen != null, () => pushLogLoad(S.push.logOpen), ['push.log']],
+  ['channel preview', () => !!S.push.ed, () => pushPreview(true), ['push.pv', 'push.pvErr']],
+  ['palette', () => S.pal.open, () => { S.pal.remote = null; renderPalette(); }, ['pal']],
+  ['shortcuts', () => S.keys.open, () => keysBody(), ['keys']],
+  // an open sheet: the alert-tuning sheet is drawn again, a question (its words fixed when it
+  // opened) is closed - nothing was confirmed
+  ['sheet', () => S.confirm.open, () => (S.confirm.tune ? tuneSheet() : closeConfirm(false)), ['confirm']],
+  // the two previews the server writes in the page's language: asked again (fix review 10e)
+  ['rule preview', () => !!S.fam.form, () => { S.fam.prev = {}; bedPreview(true); }, ['fam.prev']],
+  ['AI preview', () => !!(S.ai.prev && S.ai.prev.open), () => reloadPreview(), ['ai.prev']],
+  ['toasts', () => true, () => relabelToasts(), ['inbox.undo']],
 ];
+const LANG_NEUTRAL = {
+  'lang L': 'setLang() itself', meta: 'flags, ids, versions', 'theme route base': 'ids',
+  share: 'the Report form\'s choices (ids)', 'more sugTab sugOpen sugPlat probe probeSaving showExtIp': 'UI state, a typed URL',
+  'loading offline refreshing updated partial slow skew skel': 'flags, times', 'f edit draft hidden': 'filters and the user\'s own typing',
+  chat: 'each message carries its language (chatLangChanged)', check: 'a port check\'s progress (counts)',
+  notify: 'flags', gAt: 'a time', 'ai.form ai.saving ai.testing': 'typing, flags',
+  'fam.form fam.saving fam.wantForm': 'the rule draft (the user\'s typing)',
+  'inbox.sel inbox.picked inbox.gone': 'ids', 'set.form set.saving set.testing set.bk': 'typing, flags, a backup file',
+  'push.ed push.busy push.res push.logOpen': 'the editor\'s typing, flags',
+  'ppl.id ppl.form ppl.ferr ppl.saving ppl.q ppl.assignAfter ppl.wantForm': 'ids and the person form\'s typing',
+  'bulk bulkTo returnFocus whyOpen hygOpen map flash flashTimer openSec wantY': 'ids, flags, view state',
+};
+// page data kept after leaving its page, and results / messages written in the old language
+function forgetKept() {
+  if (S.base !== 'family') Object.assign(S.fam, { st: null, wk: null, bed: null, err: null });
+  if (S.base !== 'people') Object.assign(S.ppl, { r: null, det: null, err: null, detErr: null });
+  S.ai.test = null; S.set.errs = {}; S.set.tests = {};
+}
 function langChanged() { LANG_DEPS.forEach(([, when, run]) => { if (when()) run(); }); }
 // end LANG_DEPS
 

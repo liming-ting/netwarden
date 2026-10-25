@@ -120,6 +120,25 @@ class _Keep(dict):
         return "{" + k + "}"
 
 
+# Round 10e: placeholders that hold a quantity with a unit. A text writes "{pct}", never
+# "{pct}%" (the checker's unit_literal): given a NUMBER, t() formats it the language's way
+# (pct(14, "de") = "14 %", ms(128, "fr") = "128 ms" with Intl's narrow no-break space); a
+# string is taken as already formatted (i18n.pct(x, lang, 1) for a decimal).
+PARAM_UNITS = {"pct": "percent", "bpct": "percent", "ms": "millisecond"}
+
+
+def _with_units(kw: dict, lang: str) -> dict:
+    if not any(k in kw for k in PARAM_UNITS):
+        return kw
+    out = dict(kw)
+    for k, name in PARAM_UNITS.items():
+        v = out.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[k] = ms(v, lang) if name == "millisecond" else \
+                unit(v, name, lang, 0 if float(v).is_integer() else 1)
+    return out
+
+
 def t(key: str, lang: str = DEFAULT, **kw) -> str:
     """Translated text for `key` in `lang` (English fallback, then the key itself)."""
     cat = _catalog()
@@ -138,6 +157,7 @@ def _t(key: str, lang: str, /, **kw) -> str:
         text = cat.get(FALLBACK, {}).get(key, key)
     if not kw:
         return text
+    kw = _with_units(kw, lang)
     for k, v in kw.items():
         # a value that already ends a sentence ("44 Std. 59 Min.") at a sentence's end
         # ("... statt {last}.") must not print "Min.."
@@ -219,16 +239,29 @@ def is_plural(key: str) -> bool:
 # Numbers in server texts the way the browser's Intl.NumberFormat writes them (round 10d):
 # decimal mark and digit grouping per language (CLDR, the languages netwarden ships).
 # lang -> (decimal mark, group separator, minimum digits before grouping starts)
-_NUM = {"de": (",", ".", 4), "es": (",", ".", 5), "pt-BR": (",", ".", 4), "fr": (",", " ", 4),
-        "ru": (",", " ", 5), "id": (",", ".", 4)}
+_NUM = {"de": (",", ".", 4), "es": (",", ".", 5), "pt-BR": (",", ".", 4), "fr": (",", "\u202f", 4),
+        "ru": (",", "\u00a0", 4), "id": (",", ".", 4)}
 
 
-def num(value, lang: str = DEFAULT, decimals: int = 0) -> str:
+def _round(value, decimals: int, trim: bool) -> str:
+    """abs(value) with `decimals` places, rounded half away from zero on the number's
+    shortest decimal form - what Intl.NumberFormat does ("2.25" -> "2.3", not Python's
+    "2.2"); `trim` = maximumFractionDigits (no trailing zeros: "12.0" -> "12")."""
+    from decimal import ROUND_HALF_UP, Decimal
+    d = Decimal(repr(abs(float(value)))).quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP)
+    text = f"{d:f}"
+    if trim and "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def num(value, lang: str = DEFAULT, decimals: int = 0, trim: bool = False) -> str:
     """`value` with `decimals` places in `lang`: 1234.5 -> "1,234.5" (en), "1.234,5" (de),
-    "1 234,5" (fr); Hindi groups in lakhs ("1,23,456")."""
+    "1 234,5" (fr); Hindi groups in lakhs ("1,23,456"). `trim` = at most `decimals`
+    places, like Intl's maximumFractionDigits ("12" rather than "12.0")."""
     code = lang if lang in _catalog() else normalize(lang)
     dec, grp, min_digits = _NUM.get(code, (".", ",", 4))
-    text = f"{abs(float(value)):.{max(0, int(decimals))}f}"
+    text = _round(value, max(0, int(decimals)), trim)
     whole, _, frac = text.partition(".")
     if len(whole) >= min_digits:
         if code == "hi" and len(whole) > 3:   # 12,34,567
@@ -239,6 +272,96 @@ def num(value, lang: str = DEFAULT, decimals: int = 0) -> str:
             whole = f"{int(whole):,}".replace(",", grp)
     sign = "-" if float(value) < 0 and float(text) != 0 else ""
     return sign + whole + (dec + frac if frac else "")
+
+
+# Units the way the browser writes them (round 10e): Intl.NumberFormat(lang, {style: "unit",
+# unitDisplay: "short"}) / {style: "percent"} - CLDR, so "12,5 ГБ" in Russian, "12,5 Go" in
+# French and "14 %" in German on the server as on the page. "{0}" = the number; the spaces
+# are the exact characters Intl uses (U+00A0 no-break, U+202F narrow no-break, none in
+# Korean). tests/fixtures/intl_formats.json (made by node from Intl, tests/js/intl_formats_test.js)
+# pins every language. A text never writes a unit or "%" itself: it gets the formatted value
+# ({pct}, {ms}, {size}) from unit() / pct() / brain.human_bytes() (`i18n --check`: unit_literal).
+# "megabit-per-second" (CLI only, no page counterpart, so not in the fixture) is what Intl
+# writes too, except Russian: CLDR has a Latin "c" in "Мбит/c"; the server writes "Мбит/с".
+UNITS = ("byte", "kilobyte", "megabyte", "gigabyte", "terabyte", "millisecond", "percent",
+         "megabit-per-second")
+_UNIT_EN = {"byte": "{0} byte", "kilobyte": "{0} kB", "megabyte": "{0} MB", "gigabyte": "{0} GB",
+            "terabyte": "{0} TB", "millisecond": "{0} ms", "percent": "{0}%",
+            "megabit-per-second": "{0} Mb/s"}
+_NB, _NNB = " ", " "
+_UNIT_LANG = {
+    "zh-Hans": {"byte": "{0} B", "millisecond": "{0}毫秒", "megabit-per-second": "{0} Mb/秒"},
+    "zh-Hant": {"millisecond": "{0} 毫秒", "megabit-per-second": "{0} Mb/秒"},
+    "es": {"byte": "{0} B", "percent": "{0}" + _NB + "%"},
+    "pt-BR": {"byte": "{0} bytes"},
+    "ja": {"kilobyte": "{0} KB", "megabit-per-second": "{0} Mb/秒"},
+    "de": {"byte": "{0} Byte", "byte_one": "{0}" + _NB + "Byte", "gigabyte": "{0}" + _NB + "GB",
+           "percent": "{0}" + _NB + "%"},
+    "fr": {"byte": "{0}" + _NNB + "o", "kilobyte": "{0}" + _NNB + "ko", "megabyte": "{0}" + _NNB + "Mo",
+           "gigabyte": "{0}" + _NNB + "Go", "terabyte": "{0}" + _NNB + "To",
+           "millisecond": "{0}" + _NNB + "ms", "percent": "{0}" + _NB + "%",
+           "megabit-per-second": "{0}" + _NNB + "Mbit/s"},
+    "ko": {u: "{0}" + p[4:] for u, p in _UNIT_EN.items() if u != "percent"},
+    "ru": {"byte": "{0} Б", "kilobyte": "{0} кБ", "megabyte": "{0} МБ", "gigabyte": "{0} ГБ",
+           "terabyte": "{0} ТБ", "millisecond": "{0} мс", "percent": "{0}" + _NB + "%",
+           "megabit-per-second": "{0} Мбит/с"},
+    "id": {"millisecond": "{0} md", "megabit-per-second": "{0} Mb/dtk"},
+    "hi": {"byte": "{0} बाइट", "millisecond": "{0} मि॰से॰", "megabit-per-second": "{0} Mb/से॰"},
+}
+
+
+def unit(value, name: str, lang: str = DEFAULT, decimals: int = 1, sign: bool = False) -> str:
+    """`value` in unit `name` (UNITS) with at most `decimals` places, as Intl writes it:
+    unit(12.5, "gigabyte", "ru") -> "12,5 ГБ"; `sign` = a "+" before a positive value
+    (Intl's signDisplay "exceptZero")."""
+    code = lang if lang in _catalog() else normalize(lang)
+    n = num(value, code, decimals, trim=True)
+    if sign and n.lstrip("-").strip("0.,") and float(value) > 0:
+        n = "+" + n
+    own = _UNIT_LANG.get(code, {})
+    pat = own.get(name + "_one") if plural_category(n.lstrip("+"), code) == "one" else None
+    return (pat or own.get(name) or _UNIT_EN[name]).replace("{0}", n)
+
+
+def pct(value, lang: str = DEFAULT, decimals: int = 0, sign: bool = False) -> str:
+    """A percentage (14 = 14 %) the language's way: "14%" (en), "14 %" (de, fr, ru, es)."""
+    return unit(value, "percent", lang, decimals, sign)
+
+
+def ms(value, lang: str = DEFAULT) -> str:
+    """Milliseconds: one decimal below 10 ("3.4 ms"), whole above ("128 ms")."""
+    return unit(value, "millisecond", lang, 1 if abs(float(value)) < 10 else 0)
+
+
+# A day without its year, as app.js fmt.day() (Intl.DateTimeFormat {month, day: "numeric"})
+# writes it: "{m}" / "{d}" plain, "{mm}" / "{dd}" two digits (fixture-pinned).
+_MONTH_DAY = {"es": "{d}/{m}", "id": "{d}/{m}", "hi": "{d}/{m}", "pt-BR": "{dd}/{mm}", "fr": "{dd}/{mm}",
+              "de": "{d}.{m}.", "ko": "{m}. {d}.", "ru": "{dd}.{mm}"}
+
+
+def month_day(day, lang: str = DEFAULT) -> str:
+    """A date (datetime.date or "YYYY-MM-DD") without its year: "10/20" (en), "20.10." (de)."""
+    from datetime import date
+    d = date.fromisoformat(day) if isinstance(day, str) else day
+    code = lang if lang in _catalog() else normalize(lang)
+    return _MONTH_DAY.get(code, "{m}/{d}").format(m=d.month, d=d.day, mm=f"{d.month:02d}", dd=f"{d.day:02d}")
+
+
+def mbps(bits_per_second, lang: str = DEFAULT) -> str:
+    """A bitrate in Mb/s with at most 2 places: 1234567 -> "1.23 Mb/s", "1,23 Мбит/с" (ru)."""
+    return unit(float(bits_per_second or 0) / 1e6, "megabit-per-second", lang, 2)
+
+
+def size(n, lang: str = DEFAULT) -> str:
+    """Bytes in decimal units (like ISPs and ntopng): 1234567 -> "1.2 MB"; the loop and the
+    rounding are app.js fmt.bytes(), so a page and a server text show the same size."""
+    n = float(n or 0)
+    names = ("byte", "kilobyte", "megabyte", "gigabyte", "terabyte")
+    i = 0
+    while n >= 1000 and i < len(names) - 1:
+        n /= 1000
+        i += 1
+    return unit(n, names[i], lang, 1 if i else 0)
 
 
 def has(key: str) -> bool:
@@ -342,6 +465,17 @@ PLURAL_FIXED = {
     "app.ai.preview_tools": "ai.max_tool_rounds and the call cap are >= 2",
     "app.ai.preview_tools_plain": "ai.max_tool_rounds and the call cap are >= 2",
 }
+# Round 10e, unit_literal: a placeholder with "%" or a size / time unit written next to it
+# ("{pct}%", "{ms} ms", "{n} GB", "% {x}") - the value must come formatted (pct(), ms(),
+# size(), mbps(), or a number for PARAM_UNITS) so the unit is the language's own; bitrates and
+# spelled-out units ("Mbps", "bytes", "octets", "percent") count too. key -> why it may.
+_UNIT_RX = (r"\{\w+\}[   ]?(?:%|(?:ms|мс|毫秒|ミリ秒|md|मि॰से॰|[kKMGT]B|[kMGT]o|[кМГТ]Б"
+            r"|[kKMG]bps|[kKMG]b(?:it)?/s|[кМГ]бит/[сc]|[Bb]ytes?|octets?|байт\w*|बाइट"
+            r"|percent|Prozent|pour ?cent|por ?cento|por ?ciento|процент\w*|persen)(?![\w-]))"
+            r"|%[   ]?\{\w+\}")
+UNIT_LITERAL_OK = {
+    "app.fam.pts": "Korean writes percentage points as %p: a unit of its own, not a formatted percent",
+}
 # "device(s)", "Gerät(e)", "nouveau(x)", "устройств(о)" - never "http(s)://"
 _HEDGE_RX = r"[^\W\d_](?<!http)\((?:s|e|en|es|n|er|x|i|r|ы|и|ов|ей|ях|о)\)"
 
@@ -394,7 +528,8 @@ def check(catalog: dict | None = None, same_allow: dict | None = None) -> list:
     """Every locale problem: [(code, key, problem, detail)]. problem: missing | extra |
     empty | placeholders | same_as_en | simplified_in_hant | traditional_in_hans |
     mainland_term | plural_missing (an English count text without `_one`) | plural_forms
-    (a `_few` / `_many` form the language needs) | plural_hedge ("device(s)").
+    (a `_few` / `_many` form the language needs) | plural_hedge ("device(s)") |
+    unit_literal ("{pct}%", "{ms} ms": the unit belongs to the formatter, round 10e).
     `same_allow` = {code: {key}} accepted copies of the English text
     (netwarden/locale_same_ok.json by default)."""
     import re
@@ -439,6 +574,9 @@ def check(catalog: dict | None = None, same_allow: dict | None = None) -> list:
                             f"{sorted(_placeholders(v))} != {sorted(_placeholders(ref))}"))
             if re.search(_HEDGE_RX, v) and not k.startswith(SAME_OK_KEYS):
                 out.append((code, k, "plural_hedge", v[:60]))
+            u = re.search(_UNIT_RX, v)
+            if u and base not in UNIT_LITERAL_OK and k not in UNIT_LITERAL_OK:
+                out.append((code, k, "unit_literal", u.group(0)))
             copy = base in plural and v == vals.get(base)   # a form = the language's own base text
             if code != FALLBACK and k in en and v == en[k] and not _same_ok(k, v) and not copy \
                     and k not in same_allow.get(code, ()) and k not in same_allow.get("*", ()):

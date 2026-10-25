@@ -37,9 +37,6 @@ def _short(ts: str) -> str:
     return short(ts)
 
 
-def _gb(n: float, lang: str) -> str:
-    return i18n.num(n / 1e9, lang, 0 if n % 1e9 == 0 else 1)
-
 
 def _facts(kind: str, a: dict, lang: str, w: dict) -> list:
     t = lambda key, **kw: i18n.t("why.data." + key, lang, **kw)  # noqa: E731
@@ -117,7 +114,7 @@ def _threshold(kind: str, a: dict, lang: str, less: bool) -> str:
         return t("bedtime", min=2 * m if less else m)
     if kind == "spike":
         return t("spike", ratio=int(tuning.LESS_SPIKE_RATIO if less else alerts.SPIKE_RATIO),
-                 gb=_gb(tuning.LESS_SPIKE_BYTES if less else alerts.SPIKE_MIN_BYTES, lang),
+                 size=_bytes(tuning.LESS_SPIKE_BYTES if less else alerts.SPIKE_MIN_BYTES, lang),
                  days=alerts.SPIKE_BASELINE_DAYS)
     if kind == "change":
         return t("change", n=tuning.LESS_CHANGE_SERVICES if less else 1)

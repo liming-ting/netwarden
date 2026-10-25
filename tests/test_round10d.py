@@ -207,7 +207,7 @@ class Numbers(unittest.TestCase):
         self.assertEqual(i18n.num(1234.5, "fr", 1), "1 234,5")   # Intl: narrow no-break space
         self.assertEqual(i18n.num(1234, "es"), "1234")        # es / ru group from 5 digits
         self.assertEqual(i18n.num(12345, "es"), "12.345")
-        self.assertEqual(i18n.num(1234, "ru"), "1234")
+        self.assertEqual(i18n.num(1234, "ru"), "1 234")   # CLDR 46+: ru groups from 4 digits (10e)
         self.assertEqual(i18n.num(12345, "ru"), "12 345")
         self.assertEqual(i18n.num(1234567, "hi"), "12,34,567")
         self.assertEqual(i18n.num(3.5, "ru", 1), "3,5")
@@ -482,7 +482,7 @@ class ReviewSmallFixes(unittest.TestCase):
         self.assertIn("1,444", weekly._trend({"pct": 118}, "wow.hl.queries", "en", n=1444))
         fr = weekly._trend({"pct": 118}, "wow.hl.queries", "fr", n=1444)
         self.assertIn("1 444", fr)            # Intl's narrow no-break space
-        self.assertIn(i18n.num(118, "fr") + " %", fr)
+        self.assertIn(i18n.pct(118, "fr"), fr)   # "118 %", as Intl writes it (round 10e)
 
     def test_report_chart_text_is_localized(self):
         from netwarden import report

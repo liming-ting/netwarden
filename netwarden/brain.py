@@ -96,15 +96,16 @@ ADDON_ENV = "NETWARDEN_ADDON"          # "1" = set by the Home Assistant add-on 
 
 
 def human_bytes(n: float, lang: str | None = None) -> str:
-    """1234567 -> '1.2 MB' (decimal units, like ISPs and ntopng use); with `lang`, the
-    number the language's way ("1,2 MB" in German) - text a person reads."""
-    def f(v, d):
-        return i18n.num(v, lang, d) if lang else f"{v:.{d}f}"
+    """1234567 -> '1.2 MB' (decimal units, like ISPs and ntopng use) - the model's text.
+    With `lang`, a text a person reads: number AND unit the language's way, exactly as the
+    page writes them (i18n.size: "1,2 МБ" in Russian, "1,2 Mo" in French)."""
+    if lang:
+        return i18n.size(n, lang)
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1000:
-            return f"{f(n, 0)} {unit}" if unit == "B" else f"{f(n, 1)} {unit}"
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1000
-    return f"{f(n, 1)} TB"
+    return f"{n:.1f} TB"
 
 
 def human_bps(n: float) -> str:

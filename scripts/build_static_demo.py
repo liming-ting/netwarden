@@ -50,7 +50,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import netwarden  # noqa: E402
-from netwarden import activity, brain, cache, demo, dns_ingest, i18n, offline_ai, pairing, web  # noqa: E402
+from netwarden import activity, ai_intents, brain, cache, demo, dns_ingest, i18n, offline_ai, pairing, web  # noqa: E402
 
 DATA_DIR = "demo-data/"
 DEFAULT_SITE = "https://liming-ting.github.io/netwarden/"
@@ -421,16 +421,31 @@ def device_name(dev: dict, lang: str) -> str:
     return i18n.t("app.d.private_device" if dev.get("randomized") else "ui.unknown_device", lang)
 
 
+def suggested_questions(site: Site, lang: str) -> list:
+    """The chat's suggested questions as the REAL page orders them (app.js suggestions(),
+    no device in focus): the server's questions lead (3), then the chips built from this
+    home's alerts (ai_intents.data_chips, from the saved Overview itself) and the standing
+    questions, then the rest. Round 10e: the demo showed only the server's and the standing
+    ones, so "Is the open port 23 on ipcam dangerous?" had no saved answer."""
+    qs = json.loads(site.files[static_name(with_lang("/api/ai/questions", lang))])
+    server = [q["text"].strip() for q in qs.get("questions", []) if isinstance(q.get("text"), str)]
+    parts = json.loads(site.files[static_name(with_lang("/api/overview", lang))]).get("parts") or {}
+    local = [t for _k, t in ai_intents.data_chips(parts.get("alerts"), parts.get("privacy"), parts.get("inv"), lang)]
+    local += [i18n.t(k, lang) for k in SUGGESTED]
+    local = [t.strip() for t in local if t.strip()]
+    server = [t for t in server if t and t not in local]
+    return list(dict.fromkeys(server[:3] + local + server[3:]))
+
+
 def _answers(site: Site, request, lang: str, count: dict, quick: bool, macs=()) -> int:
     """The offline assistant's answers to the suggested questions (and to the follow-up
     questions those answers suggest, up to MAX_ANSWERS), plus "Insight", as the raw SSE
     streams the page reads; index.json lists what has an answer. Round 10b: plus every
     saved device's answer to its drawer's pre-filled question (index "devices")."""
-    qs = json.loads(site.files[static_name(with_lang("/api/ai/questions", lang))])
-    suggested = [q["text"] for q in qs.get("questions", []) if isinstance(q.get("text"), str)]
-    suggested += [i18n.t(k, lang) for k in SUGGESTED]
-    suggested = list(dict.fromkeys(t.strip() for t in suggested if t.strip()))
-    limit = 3 if quick else MAX_ANSWERS
+    suggested = suggested_questions(site, lang)
+    # round 10e: every question the page shows gets its answer (a quick build too); follow-ups
+    # up to the cap
+    limit = len(suggested) + (0 if quick else MAX_ANSWERS)
     todo, answered = [("insight", "")] + [("chat", q) for q in suggested], []
     while todo and len(answered) < limit + 1:
         mode, q = todo.pop(0)

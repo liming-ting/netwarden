@@ -162,8 +162,8 @@ def _trend(m: dict, key: str, lang: str, **kw) -> str:
     way = "same" if abs(p) < MIN_CHANGE_PCT else ("up" if p > 0 else "down")
     if isinstance(kw.get("n"), int):
         n = kw.pop("n")
-        return i18n.tn(f"{key}.{way}", n, lang, n=i18n.num(n, lang), pct=i18n.num(abs(p), lang), **kw)
-    return i18n.t(f"{key}.{way}", lang, pct=i18n.num(abs(p), lang), **kw)
+        return i18n.tn(f"{key}.{way}", n, lang, n=i18n.num(n, lang), pct=i18n.pct(abs(p), lang), **kw)
+    return i18n.t(f"{key}.{way}", lang, pct=i18n.pct(abs(p), lang), **kw)
 
 
 def highlights(c: dict, lang: str, limit: int = 5) -> list:

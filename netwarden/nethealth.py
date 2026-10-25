@@ -586,12 +586,12 @@ def verdict_text(v: dict, h: dict, lang: str, tz=None, hours: float = 24) -> dic
 
 
 def _fmt_ms(ms: float, lang: str = "en") -> str:
-    return i18n.num(ms, lang, 0 if ms >= 10 else 1)
+    return i18n.ms(ms, lang)
 
 
 def _fmt_pct(x: float, lang: str = "en") -> str:
     p = 100 * x
-    return i18n.num(p, lang, 1 if 0 < p < 10 else 0)
+    return i18n.pct(p, lang, 1 if 0 < p < 10 else 0)
 
 
 def report(db, lang: str = i18n.DEFAULT, hours: float = 24, tz=None, env: dict | None = None) -> dict:

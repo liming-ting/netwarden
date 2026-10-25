@@ -241,8 +241,8 @@ class PageCode(unittest.TestCase):
         # round 10d: the refreshes moved to LANG_DEPS, run by langChanged() after the tags are gone
         self.assertLess(f.index("forgetTags();"), f.index("langChanged();"))
         deps = APP[APP.index("const LANG_DEPS"):APP.index("// end LANG_DEPS")]
-        self.assertIn("['datasets', () => true, () => refresh()]", deps)
-        self.assertIn("['since', () => !!S.since.r, () => sinceLoad()]", deps)
+        self.assertIn("['datasets', () => true, () => refresh(), [", deps)   # round 10e: + covered paths
+        self.assertIn("['since', () => !!S.since.r, () => sinceLoad(), [", deps)
         # a refresh that was in flight when the language changed fetches again
         self.assertIn("if (lang !== S.lang) { S.refreshing = false; clearTimeout(slow); refresh(); return; }",
                       self.fn("refresh", 1200))

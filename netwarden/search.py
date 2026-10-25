@@ -112,24 +112,31 @@ def _service_device_count(db, sid: str, since: str) -> int:
                       (since, json.dumps(doms))).fetchone()[0]
 
 
+DAY_HOURS = 24   # round 10e: the device drawer's own domain table counts the last 24 h
+
+
 def _per_device(db, domains: list, since: str) -> list:
-    """Which devices looked up any of `domains`: counts in the window, first/last seen
+    """Which devices looked up any of `domains`: counts in the window (and in the last
+    24 h, the device drawer's period: the two drawers can be compared), first/last seen
     over all history. Unattributed clients appear as 'ip:<addr>'."""
     if not domains:
         return []
     names = store.device_names(db)
+    day = (datetime.now(timezone.utc) - timedelta(hours=DAY_HOURS)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     # one JSON parameter, not one "?" per domain: a service seen under thousands of
     # names would pass SQLite's limit on bound variables (Stage K)
     rows = db.execute(
         """SELECT COALESCE(device_mac, 'ip:' || client_ip) AS key, device_mac,
                   SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS n,
                   SUM(CASE WHEN ts >= ? THEN blocked ELSE 0 END) AS b,
+                  SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS day,
                   COUNT(*) AS total, MIN(ts) AS first_seen, MAX(ts) AS last_seen
            FROM dns_events WHERE domain IN (SELECT value FROM json_each(?)) GROUP BY key""",
-        (since, since, json.dumps(domains))).fetchall()
+        (since, since, day, json.dumps(domains))).fetchall()
     out = [{"mac": r["device_mac"], "name": names.get(r["device_mac"], r["key"][3:])
             if r["device_mac"] else r["key"][3:],
             "queries": r["n"], "blocked": r["b"] or 0, "queries_total": r["total"],
+            "queries_24h": r["day"],
             "first_seen": r["first_seen"], "last_seen": r["last_seen"]} for r in rows]
     out.sort(key=lambda d: (-d["queries"], -d["queries_total"], d["name"] or ""))
     return out

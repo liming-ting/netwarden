@@ -70,11 +70,10 @@ def snapshot(db, env: dict | None = None, hours: float = 24) -> dict:
     from netwarden import dashboard, inbox, nethealth, presence, suggestions
     now = datetime.now(timezone.utc)
     online_since = _iso(now - timedelta(minutes=dashboard.ONLINE_MINUTES))
-    recent = {r[0] for r in db.execute(
-        "SELECT DISTINCT device_mac FROM dns_events WHERE device_mac IS NOT NULL AND ts >= ?",
-        (online_since,))}
-    devices = {r["mac"]: bool(r["last_seen"] >= online_since or r["mac"] in recent)
-               for r in db.execute("SELECT mac, last_seen FROM devices")}
+    # online exactly as the device list says it (dashboard.last_active: the newest evidence)
+    last = dashboard.last_active(db, online_since)
+    here = dashboard.online_macs(db, last, online_since)
+    devices = {mac: mac in here for mac in last}
     items = inbox.report(db, "en", env=env, hours=hours)["items"]
     alerts = {it["id"]: {"kind": it["kind"], "mac": it["mac"], "sev": it["sev"]}
               for it in items if it["kind"] != "suggestion"}

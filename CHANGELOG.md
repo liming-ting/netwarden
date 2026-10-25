@@ -89,8 +89,47 @@ contain breaking changes).
 - The app's web manifest no longer sets `"id": "/"`: the id now defaults to the start
   URL, which is right at the root of the app's own address, under the Home Assistant
   ingress path and under the live demo's `/netwarden/` path.
+- Sizes, percents and milliseconds in server texts (alerts, health, suggestions, offline
+  answers, reports, the AI lookups) are written exactly like the dashboard writes them in
+  each language: `14,5 Go` in French, `14,5 ГБ` and `12 мс` in Russian, `14 %` in German,
+  Spanish, French and Russian. Russian numbers group from 4 digits (`1 234`).
+- Russian, French, Spanish, Portuguese and Hindi texts about a device name it as a
+  device ("L'appareil ipcam a été actif…") instead of guessing its grammatical gender;
+  arrivals and departures read "{name}: возвращение домой" instead of "пришёл(ла)".
+- German uses "24 Std." everywhere (the Inbox mixed it with "24 h").
+- The device drawer's domain table and the domain drawer say which period they count
+  ("Queries (24 h)"; "Lookups: 412 · last 24 h: 58 · …"); the DNS server's statistics on
+  Network health say why they can differ from the Overview.
 
 ### Fixed
+
+- The demo PC could show a false "DNS blind spot" alert for a few hours each day; the
+  computer netwarden runs on is no longer treated as a quiet device.
+- A device the router still knows by name (reverse DNS) no longer stays "online" after it
+  left: only a sweep, ARP, DNS or the device's own announcements count as being there.
+- The bedtime rule preview and the "What the AI will receive" dialog now follow a language
+  switch.
+- Russian device texts no longer use a masculine verb after a device name ("новые сервисы:",
+  "Впервые замечено").
+- The `traffic` CLI writes bitrates the language's way ("1,23 Мбит/с", "1,23 Mbit/s"), and
+  bedtime nights use local date order ("Пн 19.10", "Mon 10/19").
+- Query counts in the device list and the tracker table say "(24 h)"; the Network health
+  tile and summary show the same DNS failure rate ("8.2%").
+- French "Comment corriger : …" now has its space before the colon.
+- The device drawer's Person list followed the first language after a language switch;
+  every cached list the page keeps is now refreshed, or known to hold no translated words
+  (a test fails when a new one is neither).
+- Results and error messages from another page (Family, People, Settings tests) no longer
+  stay in the previous language after a switch; an open question is closed.
+- The computer netwarden runs on is always online in the device list, the map and the AI
+  lookups (when it is identified by one of its own network interfaces, not just by an
+  old sweep), and "last seen" uses the newest evidence: the LAN sweep / ARP table, DNS, or
+  what the device announced (DHCP, mDNS, SSDP).
+- Live demo: every suggested question has a saved answer (including the chips built from
+  the home's own alerts, in every language, also in the device drawer); the PC running
+  netwarden is online; the AdGuard Home box counts the same lookups as the Overview; the
+  camera has a week of steady history; announcement times are never newer than "last
+  seen".
 
 - A page or drawer for something that does not exist says "Not found" (in the live demo:
   "not part of the demo", with a link back) instead of "Server error (HTTP 404)".

@@ -145,7 +145,8 @@ def section_people(ctx) -> list:
             mine.setdefault(d["owner"], []).append(names.get(d["mac"]) or d["name"] or d["mac"])
     lines = [i18n.tn("offline.person_line", p["queries"], ctx["lang"], owner=p["owner"], devices=sep.join(mine.get(p["owner"]) or p["devices"]),
                 queries=p["queries"],
-                night=round(100 * p["night_queries_7d"] / p["queries_7d"]) if p["queries_7d"] else 0)
+                night=i18n.pct(round(100 * p["night_queries_7d"] / p["queries_7d"]) if p["queries_7d"] else 0,
+                               ctx["lang"]))
              for p in people]
     return [tr("people", h=f"{ctx['snap']['window_hours']:g}")] + _capped(ctx, lines)
 

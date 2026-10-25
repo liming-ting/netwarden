@@ -178,6 +178,52 @@ CHIPS = {"app.ai.q.exposure": {"intent": "exposure", "window": "7d"},
          "app.ai.q.new": {"intent": "new_devices", "window": "7d"},
          "app.ai.q.change": {"intent": "new_devices", "window": "7d"},
          "app.ai.q.bandwidth": {"intent": "traffic", "window": "24h"}}
+# Round 10e: the order app.js suggestions() adds them in (test-enforced); data_chips() builds
+# the same list from the same answers, so the static demo shows - and saves an answer for -
+# exactly the chips the real page would show.
+CHIP_ORDER = ("app.ai.q.threat", "app.ai.q.exposure", "app.ai.q.night", "app.ai.q.trackers",
+              "app.ai.q.visibility", "app.ai.q.new", "app.ai.q.change", "app.ai.q.bandwidth")
+GRADE_RANK = {"A": 1, "B": 2, "C": 3, "D": 4, "F": 5}   # app.js GRADE_RANK
+
+
+def data_chips(alerts_: dict | None, privacy: dict | None, inv: dict | None, lang: str) -> list:
+    """[(key, text)]: app.js suggestions()'s chips from THIS home's data, given the page's own
+    datasets (/api/overview's "alerts", "privacy" and "inv", already localized in `lang`):
+    the first live item of each kind, in CHIP_ORDER."""
+    a, p = alerts_ or {}, (privacy or {}).get("home") or {}
+    first = lambda k, ok=lambda x: True: next((x for x in a.get(k) or [] if ok(x)), None)  # noqa: E731
+    out, seen = [], set()
+
+    def add(key, **kw):
+        text = i18n.t(key, lang, **kw)
+        if text not in seen:
+            seen.add(text)
+            out.append((key, text))
+    th = first("threats")
+    if th:
+        add("app.ai.q.threat", name=th["device"])
+    ex = first("exposure")
+    if ex:
+        add("app.ai.q.exposure", name=ex["name"], port=ex["port"])
+    night = first("unusual_hours")
+    if night:
+        add("app.ai.q.night", time=re.split(r"[–-]", str(night.get("window") or ""))[0] or "00:00")
+    if p.get("tracker_queries") and GRADE_RANK.get(p.get("grade"), 0) >= 3:
+        add("app.ai.q.trackers")
+    vis = first("visibility")
+    if vis:
+        add("app.ai.q.visibility", name=vis["name"])
+    nd = first("new_devices", lambda d: not d.get("is_self"))
+    if nd:
+        add("app.ai.q.new", name=nd["name"])
+    ch = first("behavior_changes")
+    if ch:
+        add("app.ai.q.change", name=ch["name"])
+    if (inv or {}).get("has_bandwidth"):
+        add("app.ai.q.bandwidth")
+    return out
+
+
 _CHIP_GROUPS = {"name": r"(?P<name>.+?)", "port": r"(?P<port>\d{1,5})", "time": r"(?P<time>\d{1,2}:\d{2})"}
 _CHIP_RX: dict = {}
 

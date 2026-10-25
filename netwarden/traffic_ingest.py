@@ -228,9 +228,9 @@ def print_report(db, hours: float, lang: str = i18n.DEFAULT) -> None:
     print(i18n.tn("cli.traffic.report_title", len(summary), lang, hours=f"{hours:g}"))
     for key, s in sorted(summary.items(), key=lambda kv: -(kv[1]["rx_bytes"] + kv[1]["tx_bytes"])):
         print(f"  {key:<20} " + i18n.t("cli.traffic.row", lang,
-                                       down=f"{brain.human_bytes(s['rx_bytes']):>9}",
-                                       up=f"{brain.human_bytes(s['tx_bytes']):>9}",
-                                       rx=f"{s['rx_bps'] / 1e6:.2f}", tx=f"{s['tx_bps'] / 1e6:.2f}"))
+                                       down=f"{brain.human_bytes(s['rx_bytes'], lang):>9}",
+                                       up=f"{brain.human_bytes(s['tx_bytes'], lang):>9}",
+                                       rx=i18n.mbps(s["rx_bps"], lang), tx=i18n.mbps(s["tx_bps"], lang)))
     print()
 
 

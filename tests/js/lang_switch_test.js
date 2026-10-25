@@ -18,13 +18,15 @@ async function run(state) {
   const hit = name => () => { calls[name] = (calls[name] || 0) + 1; return Promise.resolve(); };
   const S = Object.assign({ base: 'overview', route: { name: 'overview' }, meta: { remote: false }, ai: { s: null },
                             since: { r: null }, push: { ed: null, logOpen: null }, pal: { open: false }, keys: { open: false },
-                            look: {} }, state);
+                            look: {}, fam: { st: null }, ppl: { r: null }, set: { errs: {}, tests: {} }, confirm: { open: false } }, state);
   const env = { S, drawerOpen: () => !!state.drawer, loadLookup: hit('lookup'), loadChoices: hit('choices'),
                 refresh: hit('refresh'), sinceLoad: hit('since'), loadAI: hit('settings'), loadPair: hit('pair'),
                 loadSetup: hit('setup'), loadTuning: hit('tuning'), loadPush: hit('push'), pushLogLoad: hit('pushlog'),
-                pushPreview: hit('preview'), renderPalette: hit('palette'), keysBody: hit('keys'), relabelToasts: hit('toasts') };
+                pushPreview: hit('preview'), renderPalette: hit('palette'), keysBody: hit('keys'), relabelToasts: hit('toasts'),
+                tuneSheet: hit('tunesheet'), closeConfirm: hit('closeconfirm'), bedPreview: hit('bedpreview'),
+                reloadPreview: hit('aipreview') };
   // eslint-disable-next-line no-new-func
-  const f = new Function(...Object.keys(env), src.slice(start, end) + '\nreturn { langChanged, LANG_DEPS };');
+  const f = new Function(...Object.keys(env), src.slice(start, end) + '\nreturn { langChanged, LANG_DEPS, LANG_NEUTRAL };');
   const M = f(...Object.values(env));
   M.langChanged();
   await new Promise(r => setTimeout(r, 0));   // the settings list's .then()
@@ -38,6 +40,61 @@ async function check(name, fn) { await fn(); checks++; console.log('ok  ' + name
   await check('the Overview: the datasets, the pickers, the toasts - nothing more', async () => {
     const { calls } = await run({});
     assert.deepStrictEqual(Object.keys(calls).sort(), ['choices', 'refresh', 'toasts']);
+  });
+
+  await check('a page\'s data kept after leaving it is forgotten; the page on screen keeps its own', async () => {
+    const kept = () => ({ fam: { st: { x: 1 }, wk: {}, bed: {}, form: { name: 'draft' } }, ppl: { r: { people: [] }, det: {}, q: 'typed' },
+                          ai: { s: null, test: { ok: false, error_text: 'old' } }, set: { errs: { a: 'old' }, tests: { adguard: {} } } });
+    const st = kept(); await run(st);   // (run() works on the state object it is given)
+    assert.strictEqual(st.fam.st, null); assert.strictEqual(st.ppl.r, null); assert.strictEqual(st.ppl.det, null);
+    assert.strictEqual(st.fam.form.name, 'draft'); assert.strictEqual(st.ppl.q, 'typed');   // the user's typing stays
+    assert.strictEqual(st.ai.test, null); assert.deepStrictEqual(st.set.errs, {}); assert.deepStrictEqual(st.set.tests, {});
+    const onFam = Object.assign(kept(), { base: 'family' }); await run(onFam);
+    assert.ok(onFam.fam.st);   // refresh() loads the open page again; nothing blank meanwhile
+    const onPpl = Object.assign(kept(), { base: 'people' }); await run(onPpl);
+    assert.ok(onPpl.ppl.r);
+  });
+
+  await check('an open sheet: the tuning sheet is drawn again, a question is closed', async () => {
+    assert.strictEqual((await run({ confirm: { open: true, tune: { kind: 'night' } } })).calls.tunesheet, 1);
+    const q = (await run({ confirm: { open: true, title: 'Sure?' } })).calls;
+    assert.strictEqual(q.closeconfirm, 1); assert.ok(!q.tunesheet);
+    assert.ok(!(await run({})).calls.closeconfirm);
+  });
+
+  await check('an open rule draft and an open AI preview are asked again (server texts)', async () => {
+    const st = { fam: { st: null, form: { name: 'draft', target: 'mac:aa' }, prev: { key: 'k', r: { text: 'old' } } } };
+    const c = (await run(st)).calls;
+    assert.strictEqual(c.bedpreview, 1); assert.deepStrictEqual(st.fam.prev, {});   // the old words never linger
+    assert.strictEqual(st.fam.form.name, 'draft');
+    assert.strictEqual((await run({ ai: { s: null, prev: { open: true } } })).calls.aipreview, 1);
+    const none = (await run({ ai: { s: null, prev: { open: false } } })).calls;
+    assert.ok(!none.aipreview && !none.bedpreview);
+  });
+
+  await check('every part of S is kept current by a row or listed as holding no translated text', async () => {
+    // the state object as app.js declares it (cut out and evaluated)
+    const s0 = src.indexOf('const S = {'), s1 = src.indexOf('\n};\n', s0);
+    assert.ok(s0 > 0 && s1 > s0, 'const S not found in app.js');
+    // eslint-disable-next-line no-new-func
+    const S = new Function(src.slice(s0, s1) + '\n};\nreturn S;')();
+    const { M } = await run({});
+    const covered = new Set(M.LANG_DEPS.flatMap(e => e[3] || []));
+    const neutral = new Set(Object.keys(M.LANG_NEUTRAL).flatMap(k => k.split(' ')));
+    for (const p of covered) assert.ok(!neutral.has(p), p + ' is both kept current and "neutral"');
+    const known = p => covered.has(p) || neutral.has(p);
+    const missing = [];
+    for (const [k, v] of Object.entries(S)) {
+      if (known(k)) continue;
+      const sub = v && typeof v === 'object' && !(v instanceof Set) && !Array.isArray(v) ? Object.keys(v) : null;
+      // an object may be split per field (ai.s kept current, ai.form neutral) - then every field must be named
+      if (sub && sub.length && [...covered, ...neutral].some(p => p.startsWith(k + '.'))) {
+        sub.filter(f => !known(k + '.' + f)).forEach(f => missing.push(k + '.' + f));
+      } else missing.push(k);
+    }
+    assert.deepStrictEqual(missing, [], 'add these to a LANG_DEPS row (4th column) or to LANG_NEUTRAL: ' + missing.join(', '));
+    for (const [k, why] of Object.entries(M.LANG_NEUTRAL)) assert.ok(String(why).trim(), k);
+    for (const p of [...covered, ...neutral]) assert.ok(p.split('.')[0] in S, p + ' is not part of S');
   });
 
   await check('a settings list kept from the Settings page is fetched again (the palette reads it)', async () => {
@@ -79,7 +136,8 @@ async function check(name, fn) { await fn(); checks++; console.log('ok  ' + name
   await check('every entry is [what, when, how]', async () => {
     const { M } = await run({});
     assert.ok(M.LANG_DEPS.length >= 10);
-    for (const e of M.LANG_DEPS) assert.ok(typeof e[0] === 'string' && typeof e[1] === 'function' && typeof e[2] === 'function');
+    for (const e of M.LANG_DEPS) assert.ok(typeof e[0] === 'string' && typeof e[1] === 'function' && typeof e[2] === 'function'
+                                           && Array.isArray(e[3]) && e[3].length, e[0]);
   });
 
   console.log(`\n${checks} checks passed`);

@@ -142,7 +142,7 @@ class DeviceTypeTests(unittest.TestCase):
                 self.assertTrue(i18n.has("devtype." + t))
                 self.assertNotEqual(devicetype.type_name(t, code), "devtype." + t)
         cam = devicetype.localize(self.guess(bw={"rx_bytes": 0, "tx_bytes": 9e9}), "en")
-        self.assertIn("9.0 GB", cam["reason"])
+        self.assertIn("9 GB", cam["reason"])   # Intl: at most one decimal (round 10e)
 
     def test_classify_all_reads_overrides(self):
         db = store.connect(":memory:")

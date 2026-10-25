@@ -161,7 +161,7 @@ def report_md(db, lang: str, hours: float = 24) -> str:
             elif c == "last_seen":
                 v = (v or "")[:16].replace("T", " ")
             elif c in ("rx_bytes", "tx_bytes"):
-                v = brain.human_bytes(v) if v is not None else None
+                v = brain.human_bytes(v, lang) if v is not None else None
             cells.append(_md_cell(v))
         lines.append("| " + " | ".join(cells) + " |")
     lines += ["", tr("footer")]

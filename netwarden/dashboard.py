@@ -31,6 +31,69 @@ def _last_dns(db, since: str) -> dict:
         "WHERE device_mac IS NOT NULL AND ts >= ? GROUP BY device_mac", (since,))}
 
 
+# Round 10e: "last seen" = the NEWEST evidence of a device: a LAN sweep / the ARP table
+# (devices.last_seen), a DNS lookup, an announcement (mDNS / SSDP / its DHCP name,
+# device_identity.last_seen) - one function for the device list, the drawer, the map, the
+# live stream and the AI lookups. The computer netwarden runs on is online while it runs.
+LOCAL_MACS_TTL = 60.0
+_local = {"at": -1e9, "macs": frozenset()}
+
+
+def local_macs() -> frozenset:
+    """This machine's own interface MACs (Linux /sys/class/net; empty elsewhere), cached."""
+    import time
+    from pathlib import Path
+    if time.monotonic() - _local["at"] > LOCAL_MACS_TTL:
+        macs = set()
+        try:
+            for p in Path("/sys/class/net").glob("*/address"):
+                try:
+                    m = p.read_text().strip().lower()
+                except OSError:
+                    continue
+                if m and m != "00:00:00:00:00:00":
+                    macs.add(m)
+        except OSError:
+            pass
+        _local.update(at=time.monotonic(), macs=frozenset(macs))
+    return _local["macs"]
+
+
+def this_computer(db) -> set:
+    """MACs of devices that ARE the computer netwarden runs on, reliably: marked is_self by
+    the sweep AND one of this machine's own interfaces now (a database copied to another
+    computer does not count) - or the demo home's own PC (its story: it runs netwarden)."""
+    rows = [r[0] for r in db.execute("SELECT mac FROM devices WHERE is_self = 1")]
+    if not rows:
+        return set()
+    if store.is_demo(db):
+        return set(rows)
+    own = local_macs()
+    return {m for m in rows if m and m.lower() in own}
+
+
+def last_active(db, since: str) -> dict:
+    """mac -> the newest evidence that the device was there (UTC ISO): sweep / ARP, DNS
+    since `since`, what the device announced itself (mDNS / SSDP / NetBIOS). Evidence only -
+    never the clock (the answers stay cacheable: same data, same ETag); this computer's
+    "online" is online_macs()' job. Reverse-DNS ('dhcp' / 'dns') names do NOT count: the
+    router answers them from its lease table whether or not the device is there."""
+    out = {r[0]: r[1] for r in db.execute("SELECT mac, last_seen FROM devices")}
+    marks = ",".join("?" * len(store.ANNOUNCED_SOURCES))
+    for src in (_last_dns(db, since), {r[0]: r[1] for r in db.execute(
+            f"SELECT mac, MAX(last_seen) FROM device_identity WHERE source IN ({marks}) "
+            "GROUP BY mac", store.ANNOUNCED_SOURCES)}):
+        for mac, ts in src.items():
+            if mac in out and ts and ts > (out[mac] or ""):
+                out[mac] = ts
+    return out
+
+
+def online_macs(db, last: dict, online_since: str) -> set:
+    """Who is online: seen since `online_since` (last_active()), plus this computer."""
+    return {mac for mac, ts in last.items() if ts and ts >= online_since} | this_computer(db)
+
+
 def _bare_device(row, label: str | None, prof: dict, t: dict | None, trusted: bool,
                  lang: str) -> dict:
     """A known device with no DNS in the window, in the snapshot-device shape."""
@@ -56,7 +119,8 @@ def inventory(db, snap: dict, lang: str, hours: float = 24, now: datetime | None
     labels, profiles = store.get_labels(db), store.get_profiles(db)
     acks = store.list_acks(db)
     types = None   # classify_all() only if some device is missing from the snapshot
-    last_dns = _last_dns(db, since)
+    last = last_active(db, since)
+    here = online_macs(db, last, online_since)
     # The table's privacy column must agree with the drawer / /api/privacy: every device
     # with DNS in the window gets its grade (the snapshot only carries it when there are
     # tracker lookups - that is what the LLM needs, not what a table needs).
@@ -83,10 +147,10 @@ def inventory(db, snap: dict, lang: str, hours: float = 24, now: datetime | None
         if "privacy" not in d and mac in priv:
             d["privacy"] = {k: priv[mac][k] for k in ("grade", "tracker_share", "blocked_share",
                                                      "main_category", "main_company")}
-        active =max(filter(None, (row["last_seen"], last_dns.get(mac))))
+        active = last.get(mac) or row["last_seen"]
         risky = [p for p in d.get("open_ports", []) if p.get("risk") in RISKY_PORTS]
         d.update(first_seen=row["first_seen"], last_seen=row["last_seen"], last_active=active,
-                 online=active >= online_since, new=row["first_seen"] >= since,
+                 online=mac in here or active >= online_since, new=row["first_seen"] >= since,
                  randomized=bool(row["randomized"]), threat_count=threats.get(mac, 0),
                  risky_ports=len(risky), upnp_risky=upnp_risky.get(mac, 0))
         if (profiles.get(mac) or {}).get("shared"):

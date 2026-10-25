@@ -180,11 +180,11 @@ class BedtimeTests(_Store, unittest.TestCase):
         self.assertEqual(bedtime.hits(self.db, {**rule, "min_minutes": 60}, self.now - timedelta(days=7), self.now, TZ8), [])
         self.assertEqual(bedtime.hits(self.db, {**rule, "days": [4]}, self.now - timedelta(days=7), self.now, TZ8), [])
         text = bedtime.localize_hit(h, {KID: "kid-tab"}, "en")["text"]
-        self.assertEqual(text, "kid-tab was in use for about 44 min after bedtime (22:00–07:00, night of Tue 10-20), mostly YouTube.")
+        self.assertEqual(text, "kid-tab was in use for about 44 min after bedtime (22:00–07:00, night of Tue 10/20), mostly YouTube.")
         # stored + previewed through the public API shapes
         rid = store.save_bedtime_rule(self.db, bedtime.validate(self.db, dict(self.RULE)))
         p = bedtime.preview(self.db, bedtime.validate(self.db, dict(self.RULE)), "en", tz=TZ8, now=self.now)
-        self.assertIn("Tue 10-20", p["summary"])
+        self.assertIn("Tue 10/20", p["summary"])
         rep = bedtime.report(self.db, "zh-Hant", tz=TZ8, now=self.now)
         self.assertEqual(rep["rules"][0]["id"], rid)
         self.assertEqual(rep["people"], ["Kid"])

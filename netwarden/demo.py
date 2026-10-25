@@ -228,6 +228,9 @@ DEVICES = [
     {
         "ip": "192.168.1.51", "mac": "a0:43:b0:9f:21:5e", "vendor": "Shenzhen",
         "hostname": "ipcam", "randomized": False, "is_self": False,
+        # round 10e: a camera phones home the same every day, so its week is its day x 7
+        # (the light baseline left "59 today" next to "67x so far")
+        "steady": True,
         "profile": [
             ("xmeye.net", "A", 38, False, "always"),
             ("star1.xmeye.net", "A", 22, False, "night"),
@@ -431,6 +434,31 @@ def _ts_baseline(now: datetime, uniq: int, when: str = "always", tz=timezone.utc
     return _utc(cand)
 
 
+STEADY_DAYS = 6     # a steady device's extra history: days 1..6 before the last 24 h
+
+
+def _steady_days(d: dict, now: datetime, tz=timezone.utc) -> list:
+    """[(UTC ts, domain)]: each of the last STEADY_DAYS days before the recent window
+    gets the device's daily count of every profile domain, at the same local hours (its
+    own RNG: nothing else in the demo moves)."""
+    srng = random.Random(SEED + 2)
+    span = {"day": (7, 22), "night": (0, 5)}
+    out = []
+    for day in range(1, STEADY_DAYS + 1):
+        base = (now - timedelta(days=day)).astimezone(tz)
+        for (domain, _qtype, count, blocked, when) in d["profile"]:
+            if blocked:
+                continue
+            lo, hi = span.get(when, (0, 23))
+            for _ in range(count):
+                t = base.replace(hour=srng.randint(lo, hi), minute=srng.randrange(60),
+                                 second=srng.randrange(60), microsecond=srng.randrange(1_000_000))
+                if t > (now - timedelta(hours=24)).astimezone(tz):
+                    t -= timedelta(days=1)    # stays before the recent window
+                out.append((_utc(t), domain))
+    return out
+
+
 def night_burst_windows(now: datetime, tz) -> list:
     """The kid's tablet: LOCAL 01:00-02:00 on the last two nights, as UTC (start, end)
     pairs, newest first. The newest must lie inside the alert's last-24-h window
@@ -539,17 +567,21 @@ UPNP_STALE = [("192.168.1.77", "UDP", 51413, 51413, "Transmission", 120)]
 
 
 def build_identity(db, now: datetime, h: dict | None = None) -> int:
+    """Announcements, each last heard when the device was last there (round 10e: every
+    name was "seen 9 minutes ago", so an offline camera said "seen 13 minutes ago" next to
+    "Offline, 1 hour ago"). Runs after devices.last_seen is final."""
+    sweep = (now - timedelta(minutes=SEEN_JUST_NOW_MIN)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    seen = {r[0]: r[1] for r in db.execute("SELECT mac, last_seen FROM devices")}
     for mac, src, name, maker, model, kind, detail, days in identity(h):
         first = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        last = (now - timedelta(minutes=SEEN_JUST_NOW_MIN)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        last = min(seen.get(mac) or sweep, sweep)
         store.upsert_identity(db, mac, src, name, maker, model, kind, detail, seen=first)
-        store.upsert_identity(db, mac, src, seen=last)
+        store.upsert_identity(db, mac, src, seen=max(first, last))
     # the reverse-DNS names the sweep saw (what the router's DHCP calls them)
     for d in DEVICES:
         if d["hostname"] and not d["is_self"] and "." not in d["hostname"]:
             store.upsert_identity(db, d["mac"], "dhcp", name=d["hostname"],
-                                  seen=(now - timedelta(minutes=SEEN_JUST_NOW_MIN)).strftime(
-                                      "%Y-%m-%dT%H:%M:%S.%fZ"))
+                                  seen=min(seen.get(d["mac"]) or sweep, sweep))
     return db.execute("SELECT COUNT(*) FROM device_identity").fetchone()[0]
 
 
@@ -912,8 +944,8 @@ ROUTER_BLIP = (19, 41, 3)     # yesterday 19:41, 3 minutes: the router stops ans
 OUTAGE_CLIENT = "a0:43:b0:9f:21:5e"          # the ipcam keeps retrying its cloud
 OUTAGE_DOMAINS = ("xmeye.net", "pool.ntp.org")
 OUTAGE_LOOKUPS = 5                           # failed lookups per outage minute
-DNS_STATS = {"queries": 6412, "blocked": 803, "avg_ms": 11.6,
-             "upstreams": [("192.168.1.1:53", 14.2)]}
+# (queries / blocked are counted from the seeded lookups: see build_health)
+DNS_STATS = {"avg_ms": 11.6, "upstreams": [("192.168.1.1:53", 14.2)]}
 
 
 # Round 10c: the ISP outage always ENDS at least ISP_CLEAR before the demo's "now" - the
@@ -990,10 +1022,16 @@ def build_health(db, now: datetime, tz) -> int:
                 events.append(ev)
     store.insert_events(db, events)
     nethealth.update_outages(db, now, hours=HEALTH_HOURS + 1)
+    # AdGuard's own counters: the home's lookups of the last 24 h, as the Overview counts
+    # them (round 10e: a fixed 6,412 / 803 sat next to the Overview's 682 / 14 %)
     s = DNS_STATS
+    day = (_utc(now - timedelta(hours=24)), _utc(now))
+    q, b = db.execute("SELECT COUNT(*), IFNULL(SUM(blocked), 0) FROM dns_events WHERE ts >= ? AND ts <= ?",
+                      day).fetchone()
+    # stamped with the story's "now" (not the clock a few seconds into the build: the page
+    # said "in 15 seconds")
     store.set_meta(db, "dns_server_stats", json.dumps(
-        dns_ingest.stats_summary("adguard", s["queries"], s["blocked"], s["avg_ms"],
-                                 s["upstreams"])))
+        dict(dns_ingest.stats_summary("adguard", q, b, s["avg_ms"], s["upstreams"]), ts=_utc(now))))
     return len(rows)
 
 
@@ -1426,6 +1464,13 @@ def build(path: Path = DEMO_DB, now: datetime | None = None, household: str | No
                     events.append(_event(d, _ts_baseline(now, uniq, when, tz), domain, qtype,
                                          blocked))
 
+        # round 10e: a steady device's earlier days look like its last one (own RNG, so
+        # every other device's history stays exactly as before)
+        if d.get("steady") and not recent_only:
+            for ts, domain in _steady_days(d, now, tz):
+                uniq += 1
+                events.append(_event(d, ts, domain, "A", False))
+
         # Services that appear ONLY in the recent window (a planted behavior change):
         for (domain, qtype, count, blocked, when) in d.get("new_in_recent", []):
             for _ in range(count):
@@ -1467,6 +1512,9 @@ def build(path: Path = DEMO_DB, now: datetime | None = None, household: str | No
                           SELECT MAX(ts) FROM presence_samples WHERE mac = devices.mac)
                       WHERE (SELECT MAX(ts) FROM presence_samples WHERE mac = devices.mac)
                             > last_seen""")
+        # ... and this PC runs netwarden: the last sweep saw it (round 10e: "Offline, 8 hours
+        # ago" next to its "this computer" tag and its backup spike)
+        db.execute("UPDATE devices SET last_seen = ? WHERE is_self = 1 AND last_seen < ?", (just_now, just_now))
     checks = build_port_checks(db, now)
     build_identity(db, now, h)
     build_upnp(db, now)

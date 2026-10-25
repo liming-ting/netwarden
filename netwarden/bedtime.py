@@ -223,9 +223,9 @@ def suppress_night(db, night: list, tz: tzinfo | None = None) -> list:
 # --- text + API shapes ---------------------------------------------------------------
 
 def night_label(night: str, lang: str) -> str:
-    """'2026-10-20' -> 'Tue 10-20' (weekday localized)."""
+    """'2026-10-20' -> 'Tue 10/20', 'Вт 20.10' (weekday and date the language's way)."""
     d = date.fromisoformat(night)
-    return f"{activity.weekday_names(lang)[d.weekday()]} {d:%m-%d}"
+    return f"{activity.weekday_names(lang)[d.weekday()]} {i18n.month_day(d, lang)}"
 
 
 def days_text(days: list, lang: str) -> str:

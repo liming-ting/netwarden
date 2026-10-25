@@ -240,7 +240,7 @@ def reason_text(res: dict, lang: str) -> str:
         p["service"] = services.service_name(p["service"], lang)
     if "tx" in p:
         from netwarden.brain import human_bytes  # brain imports us; import lazily
-        p["tx"] = human_bytes(p["tx"])
+        p["tx"] = human_bytes(p["tx"], lang)
     if "via" in p:   # protocol names read the same in every language (no nested brackets)
         p["via"] = {"mdns": "mDNS", "ssdp": "SSDP", "netbios": "NetBIOS"}.get(p["via"], p["via"])
     return i18n.t("devtype.reason." + key, lang, **p)

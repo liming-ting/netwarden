@@ -150,9 +150,8 @@ re-checked every 2 s; restart after editing locales/), CSP `script-src 'self'`.
 read-only); `/api/chat/preview` never calls the model; `/api/ai/test` = explicit click. /api/meta never exposes configured URLs.
 Redaction via `scrub` in brain + RedactingProvider. WSL mirrored loopback DROPS connects to closed ports.
 
-**Identification (Stage N)** - docs/identification.md: name label > hostname > announced > vendor; "Use this name" = POST /api/label.
-**Family insights (Stage F)** - docs/family.md: `/api/screentime|weekly|bedtime`, `/report/weekly`; table `bedtime_rules`
-= user data; alert `bedtime` (ack `bedtime:<id>:<night>`). Everything is an ESTIMATE for family conversations - keep that framing.
+**Identification (Stage N)** - docs/identification.md: label > hostname > announced > vendor. **Family (Stage F)** - docs/family.md:
+`/api/screentime|weekly|bedtime`; `bedtime_rules` = user data; ack `bedtime:<id>:<night>`. Everything is an ESTIMATE - keep that framing.
 **Network health + suggestions + score (Stage H)** - docs/health.md: tables `health_samples`, `outages`, `score_history`
 (pruned) + `suggestion_state` (USER). `GET /api/health|suggestions|score`; `POST /api/suggestions/<id> {status, days?}`;
 alert `outage` ack (mac `network`, `outage:<id>`). `health.internet_probe` OFF by default. New suggestion kind = detector
@@ -169,16 +168,11 @@ turns it ON; AI lookups hide liveness of people without it. Notifications ONLY v
 **Quiet hours, tuning, why, hygiene (Stage Q)** - docs/dev/stageq.md: settings `quiet.*` (off); `GET /api/notify|tuning|hygiene`,
 `web.TUNING_POSTS` (restoring a legacy switch = loopback; whole-home "off" of `tuning.CRITICAL_KINDS` = loopback + `confirm`);
 alerts carry `explain` (inbox/drawer: `why`); chat `alert {kind, mac, key}` -> redacted context.
-**AI lookups (Stage A)** - docs/dev/ai_tools.md: settings `ai.tools` auto|off, `ai.max_tool_rounds` (4);
-SSE `status|tool|note|suggest`; `GET /api/ai/questions`; refused tools -> `brain._NO_TOOLS`. Results = DATA.
-**Map, live, since, speed (Stage T)** - docs/dev/stage_t.md: `live.poke(db)` after loops/Warmer/POSTs (no per-client
-polling); streams 8 / 3 per client, never in DATA_GATE; `/api/overview` = `web._dataset()` parts; JSON GET ETag -> 304.
-**Accessibility + degradation (Stage G)** - docs/dev/accessibility.md: WCAG 2.2 AA; tokens tested for contrast (never `#fff`
-on fills); announce via `speak()` only; UI errors via `errText()` (never `e.message`); GET raising -> localized 500 / 503.
-**Robustness (Stage K)** - docs/dev/hardening.md: fuzz `tests/fuzzkit.py` (`NETWARDEN_FUZZ=heavy|<n>`); source bodies via
-`health.read_source_json` (16 MB / 60 s); stored errors via `health.error_text`; `store.DBError` -> CLI exit 2 / API 503
-`err.db_*`; protocol errors = localized JSON 4xx (`Handler.send_error`); one DB conn per request (`_db()`); SIGTERM = Ctrl+C;
-WAL capped + `store.checkpoint`. Legacy DB fixtures: `tests/fixtures/`. Soak: `scripts/soak.py`.
+**AI lookups (Stage A)** - docs/dev/ai_tools.md: `ai.tools` auto|off, `ai.max_tool_rounds` (4); SSE `status|tool|note|suggest`; refused -> `brain._NO_TOOLS`.
+**Map, live, since (Stage T)** - docs/dev/stage_t.md: `live.poke(db)` after loops/Warmer/POSTs; streams 8 / 3 per client; JSON GET ETag -> 304.
+**Accessibility (Stage G)** - docs/dev/accessibility.md: WCAG 2.2 AA; contrast-tested tokens; `speak()` only; UI errors via `errText()`.
+**Robustness (Stage K)** - docs/dev/hardening.md: fuzz `tests/fuzzkit.py`; source bodies via `health.read_source_json` (16 MB / 60 s);
+`store.DBError` -> CLI exit 2 / API 503; protocol errors = localized JSON 4xx (`Handler.send_error`); one DB conn per request; WAL capped.
 **Packaging + headless (round 6 D)** - docs/install.md (+ .zh-TW), docs/lan.md "Admin sessions": `__version__` = pyproject
 (test); setuptools package; `store.DATA_DIR` (NETWARDEN_DB > NETWARDEN_DATA_DIR > checkout data/ > XDG). `Handler.admin` = local
 or `sessions.admin` (`pair --admin`, 15 min); `remote` in /api/meta = NOT admin. Local = loopback AND no advertised proxy host
@@ -191,9 +185,11 @@ relative manifest/css, sw.js scope): NEVER add a root-absolute URL to static/. T
 **Static demo (round 9 W)** - docs/dev/static_demo.md: `DEMO` in app.js ONLY with data-static-demo + static/demo.js (`NWDemo.file` = builder
 `static_name`, fixture-pinned); a NEW GET the page makes = add it to the builder (`PAGES`/`DEVICE_GETS`) or it 404s there; DEMO never POSTs.
 10b/10c: `demo.HOUSEHOLDS`; `lastTag[k]` per dataset + `forgetTags()` on setLang; chat messages carry `lang`; outage ends >= `demo.ISP_CLEAR` ago.
-**Plurals + language switch (10d)** - docs/dev/i18n.md: count = base + `_one` (+ ru `_few`/`_many`) via `i18n.tn()`/`TN()`, 2+ counts = "A: {a} · B: {b}";
-checker plural_missing|forms|hedge (never-1 -> PLURAL_FIXED); `_one` drops `{n}` only where one == 1 (NOT ru/fr/pt-BR/hi); `i18n.num()`,
-`list_sep`; new server text = `refresh()` or a `LANG_DEPS` row. A new chat chip in app.js = `ai_intents.CHIPS` (or offline_ai.SUMMARY_CHIPS) - test-enforced.
+**Plurals, language switch, formats (10d/10e)** - docs/dev/i18n.md: counts via `i18n.tn()`/`TN()` (base + `_one`, ru `_few`/`_many`); ONE
+format layer `i18n.num|pct|ms|size|unit|mbps|month_day` = app.js `fmt` (fixture intl_formats.json from node `tests/js/intl_formats_test.js
+[--write]`, CLDR-stamped: other CLDR = skip); never a unit/"%" next to a placeholder (checker `unit_literal`). Server text the page shows =
+`refresh()` or a `LANG_DEPS` row (covered S paths, else `LANG_NEUTRAL`). Chat chips = `ai_intents.CHIPS` / `data_chips` (test-enforced).
+`dashboard.last_active` = newest evidence (no clock; announcements only, never PTR/DHCP), `online_macs` + `this_computer`; is_self never "quiet".
 **Push (round 10 N)** - docs/notifications.md: tables push_channels (secrets column: NEVER in API/log/backup; log = shown_endpoint)
 / push_outbox (UNIQUE(channel,key) = dedupe + queue; new/resumed channel PRIMED) / push_log; admin-only `web.PUSH_GETS|POSTS`;
 levels minimal|standard|detailed (scrub() + hashed id below detailed); env `NETWARDEN_NOTIFY_<n>_*` read-only (absent = row STALE, never
@@ -219,14 +215,14 @@ python3 -m netwarden notify list | test NAME | send-digest [--daily]   # push ch
 NETWARDEN_HEADLESS=1 NETWARDEN_HOST=0.0.0.0|<lan-ip> python3 -m netwarden run   # container mode; --version
 bash scripts/adguard_dev.sh start; python3 scripts/dns_traffic.py   # DEV AdGuard (DNS :5354, API :3000); never for users
 python3 -m netwarden.web --db data/demo.db; python3 -m netwarden.alerts --db data/demo.db  # must work; perf_db.py / soak.py: perf
-python3 -m unittest discover -s tests          # 1412 tests, all must pass (+ node tests/js/*.js)
+python3 -m unittest discover -s tests          # 1458 tests, all must pass (+ node tests/js/*.js)
 ```
 Windows: `scripts\start_windows.cmd` (:8787) / `start_demo_windows.cmd` (:8788). Manual checks: own `--offline-ai` server on 127.0.0.1:8799, COPY of the demo DB.
 
 ## Status & next steps
 
 **Done:** MVP, i18n, demo; stages C P D1 D2 E1/E2 V L N F H M X V3 V4 Q A T U G K + review fixes; rounds 6 D/H/O/P/E, 7 L/C, 8 R,
-CI1, 9 V/U/X/W, 10 N/P, 10b, 10c, 10d (tests `test_round*.py`). Standing rules from them: third-party code only in netwarden/vendor/, downloaded
+CI1, 9 V/U/X/W, 10 N/P, 10b, 10c, 10d, 10e (tests `test_round*.py`). Standing rules from them: third-party code only in netwarden/vendor/, downloaded
 data (manuf, threat feed) never in tree/wheel/image; AI cost (docs/dev/ai_cost.md): no cache breakpoint on the snapshot, `usage.Guard`
 before EVERY tool round, re-check prices + bump PRICES_CHECKED; ghcr.io/liming-ting/netwarden + netwarden-addon (lower case);
 AGPL-3.0-or-later, LICENSE hash-pinned (NEVER edit, no per-file headers), `netwarden.LICENSE|SOURCE_URL|COPYRIGHT` = ONE source; images
